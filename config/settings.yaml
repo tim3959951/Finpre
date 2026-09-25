@@ -1,0 +1,67 @@
+# Fintech Agent configuration. Environment variables in ${VAR} form are expanded.
+
+data:
+  cache_dir: data_cache          # parquet cache for prices / chips / fundamentals
+  cache_ttl_hours: 12
+  history_years: 6
+  finmind_token: ${FINMIND_TOKEN}
+  market_index:
+    TW: "^TWII"                  # 加權指數
+    US: "^GSPC"                  # S&P 500
+  volatility_index:
+    US: "^VIX"
+
+forecasting:
+  # v1 champion: TimesFM 2.5 (Apache-2.0, commercial use OK)
+  champion: timesfm-2.5
+  challengers: [chronos-2, chronos-bolt-small, naive, drift, arima, dlinear, lgbm, ensemble]
+  # TimesFM 3.0 weights are NON-COMMERCIAL. Only enable for research comparison.
+  allow_noncommercial_models: false
+  inference_device: cpu          # cpu | mps | cuda | auto  (cpu is fastest for small batches on M2)
+  training_device: auto          # auto -> mps on Apple Silicon
+  context_length: 512
+  default_horizon: 5             # trading days
+  horizons: [5, 20]
+  quantiles: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+  ensemble_members: [timesfm-2.5, chronos-2, chronos-bolt-small]
+  checkpoints_dir: checkpoints
+
+evaluation:
+  runs_dir: runs
+  backtest_windows: 60
+  backtest_step: 5
+  # round-trip trading cost (fee + tax) used by the strategy backtest
+  cost_bps:
+    TW: 58.5                     # 0.1425% x2 手續費 + 0.3% 證交稅
+    US: 5
+  signal_threshold: 0.0          # go long if forecast return > threshold
+  ab_test_alpha: 0.05
+  # champion is chosen on probabilistic accuracy (the quant agent consumes P(up) and the P10-P90 band)
+  ab_metric: crps_rel             # CRPS as % of price (scale-free across tickers)
+  promote_baselines: false       # naive/drift winning means 'no model has an edge', not 'use naive'
+
+llm:
+  provider: ${FA_LLM_PROVIDER:-anthropic}      # anthropic | openai | ollama | none
+  model: ${FA_LLM_MODEL:-}                      # empty -> provider default below
+  temperature: 0.2
+  max_tokens: 2000
+  defaults:
+    anthropic: ${ANTHROPIC_MODEL:-}   # empty -> newest mid-tier model from the Anthropic Models API
+    openai: ${OPENAI_MODEL:-gpt-4.1-mini}
+    ollama: ${OLLAMA_MODEL:-qwen3:8b}  # falls back to any installed Ollama model
+  ollama:
+    think: false                  # thinking models answer directly (much faster, cleaner JSON)
+    num_ctx: 16384
+  # optional per-agent overrides, e.g. cheaper model for specialists
+  per_agent: {}
+  #   technical: {provider: ollama, model: qwen3:8b}
+  #   advisor:   {provider: anthropic}
+
+agents:
+  language: zh-TW
+  # how the advisor blends specialist scores before its own judgement
+  weights:
+    technical: 0.30
+    fundamental: 0.30
+    quant: 0.40
+  news_limit: 15
