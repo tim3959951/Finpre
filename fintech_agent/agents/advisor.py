@@ -140,12 +140,12 @@ class InvestmentAdvisor:
             return decision
         prompt = P.DECISION_TEMPLATE.format(
             client=json.dumps(ctx.client.to_dict(), ensure_ascii=False), name=ctx.name, code=ctx.symbol.code,
-            market=ctx.symbol.market, close=round(ctx.close, 2), horizon=ctx.horizon,
+            market=ctx.symbol.market, currency=ctx.symbol.currency, close=round(ctx.close, 2), horizon=ctx.horizon,
             reports=json.dumps({k: r.brief() for k, r in reports.items()}, ensure_ascii=False, indent=1),
             weights=json.dumps(self.weights), draft=json.dumps(draft, ensure_ascii=False, indent=1),
             max_pos=ctx.client.max_position_pct)
         try:
-            resp = self.llm.chat([Message("user", prompt)], system=P.ADVISOR, max_tokens=2500)
+            resp = self.llm.chat([Message("user", prompt)], system=P.ADVISOR, max_tokens=2500, json_mode=True)
             data = extract_json(resp.text) or {}
         except Exception as e:
             log.warning("advisor LLM failed: %s", e)

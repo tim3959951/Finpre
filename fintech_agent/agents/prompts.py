@@ -45,7 +45,7 @@ ADVISOR = """你是「首席投資顧問 Agent」，20 年資產管理經驗，�
 - 用專業但易懂的口吻與客戶對話，必要時反問客戶的風險承受度或持倉狀況。
 """ + COMMON_RULES
 
-NARRATE_TEMPLATE = """以下是 {name}（{code}，{market}）的{role}證據（JSON）與規則引擎評分。
+NARRATE_TEMPLATE = """以下是 {name}（{code}，{market}，價格幣別 {currency}）的{role}證據（JSON）與規則引擎評分。
 
 規則引擎分數：{score:+.2f}（範圍 -2 強烈看空 ~ +2 強烈看多），信心 {confidence:.0%}
 觸發規則：
@@ -74,7 +74,7 @@ SENTIMENT_TEMPLATE = """以下是 {name}（{code}）近期新聞標題。請逐�
 
 DECISION_TEMPLATE = """客戶資料：{client}
 
-標的：{name}（{code}，{market}），最新收盤 {close}，分析期間 {horizon} 個交易日。
+標的：{name}（{code}，{market}），最新收盤 {close} {currency}，分析期間 {horizon} 個交易日。
 
 三位專家報告（分數 -2~+2）：
 ```json

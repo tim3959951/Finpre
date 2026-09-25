@@ -7,7 +7,7 @@
 ## 快速開始（M2 Mac）
 
 ```bash
-cd ~/Projects/fintech-agent
+git clone git@github.com:tim3959951/Finpre.git && cd Finpre
 uv venv --python python3.11 .venv && source .venv/bin/activate
 uv pip install -e ".[models,llm,dev]"
 cp .env.example .env        # 填入 ANTHROPIC_API_KEY / OPENAI_API_KEY / FINMIND_TOKEN（皆為選填）

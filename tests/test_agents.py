@@ -17,7 +17,7 @@ class ScriptedLLM(LLMClient):
     def __init__(self):
         self.calls = 0
 
-    def chat(self, messages, system=None, tools=None, temperature=None, max_tokens=None):
+    def chat(self, messages, system=None, tools=None, temperature=None, max_tokens=None, json_mode=False):
         self.calls += 1
         last = messages[-1]
         if tools and last.role == "user":

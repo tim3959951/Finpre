@@ -42,7 +42,8 @@ class FundamentalAgent(BaseAgent):
         try:
             resp = self.llm.chat([Message("user", P.SENTIMENT_TEMPLATE.format(name=ctx.name, code=ctx.symbol.code,
                                                                               headlines=heads))],
-                                 system="你是金融新聞情緒分析模型，只輸出 JSON。", max_tokens=800)
+                                 system="你是金融新聞情緒分析模型，只輸出 JSON。", max_tokens=800,
+                                 json_mode=True)
             data = extract_json(resp.text) or {}
             scores = [float(np.clip(float(x), -1, 1)) for x in data.get("scores", [])][: len(news)]
             if scores:

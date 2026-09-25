@@ -52,7 +52,8 @@ class AnthropicClient(LLMClient):
                 push("user", [{"type": "tool_result", "tool_use_id": m.tool_call_id, "content": m.content}])
         return out
 
-    def chat(self, messages, system=None, tools=None, temperature=None, max_tokens=None) -> LLMResponse:
+    def chat(self, messages, system=None, tools=None, temperature=None, max_tokens=None,
+             json_mode=False) -> LLMResponse:
         kw = {"model": self.model, "max_tokens": max_tokens or self.max_tokens, "messages": self._convert(messages)}
         if system:
             kw["system"] = system
@@ -106,12 +107,15 @@ class OpenAICompatClient(LLMClient):
                 out.append({"role": "tool", "tool_call_id": m.tool_call_id, "content": m.content})
         return out
 
-    def chat(self, messages, system=None, tools=None, temperature=None, max_tokens=None) -> LLMResponse:
+    def chat(self, messages, system=None, tools=None, temperature=None, max_tokens=None,
+             json_mode=False) -> LLMResponse:
         kw: dict = {"model": self.model, "messages": self._convert(messages, system),
                     "temperature": self.temperature if temperature is None else temperature}
         if tools:
             kw["tools"] = [{"type": "function", "function": {"name": t.name, "description": t.description,
                                                               "parameters": t.parameters}} for t in tools]
+        if json_mode and not tools:
+            kw["response_format"] = {"type": "json_object"}
         mt = max_tokens or self.max_tokens
         t0 = time.time()
         try:
@@ -179,7 +183,8 @@ class OllamaClient(LLMClient):
                 out.append({"role": "user", "content": m.content})
         return out
 
-    def chat(self, messages, system=None, tools=None, temperature=None, max_tokens=None) -> LLMResponse:
+    def chat(self, messages, system=None, tools=None, temperature=None, max_tokens=None,
+             json_mode=False) -> LLMResponse:
         body: dict = {"model": self.model, "messages": self._convert(messages, system), "stream": False,
                       "think": self.think,
                       "options": {"temperature": self.temperature if temperature is None else temperature,
@@ -187,6 +192,8 @@ class OllamaClient(LLMClient):
         if tools:
             body["tools"] = [{"type": "function", "function": {"name": t.name, "description": t.description,
                                                                 "parameters": t.parameters}} for t in tools]
+        if json_mode and not tools:
+            body["format"] = "json"          # grammar-constrained decoding: always valid JSON
         t0 = time.time()
         r = httpx.post(f"{self.host}/api/chat", json=body, timeout=self.timeout)
         if r.status_code == 400 and "think" in r.text.lower():      # model without a thinking switch
@@ -206,5 +213,9 @@ class OllamaClient(LLMClient):
                     args = {}
             calls.append(ToolCall(tc.get("id") or uuid.uuid4().hex[:12], fn.get("name", ""), args))
         usage = {"input_tokens": data.get("prompt_eval_count"), "output_tokens": data.get("eval_count")}
-        return LLMResponse(strip_thinking(msg.get("content") or ""), calls, usage, data.get("done_reason"),
-                           time.time() - t0)
+        text = msg.get("content") or ""
+        if not text.strip() and not calls and not self.think:
+            # some thinking-capable models (e.g. qwen3-vl) return the whole answer in `thinking`
+            # when thinking is switched off — it is the answer, not a reasoning trace
+            text = msg.get("thinking") or ""
+        return LLMResponse(strip_thinking(text), calls, usage, data.get("done_reason"), time.time() - t0)

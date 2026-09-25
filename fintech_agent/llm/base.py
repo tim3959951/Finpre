@@ -55,7 +55,9 @@ class LLMClient:
     max_tokens: int = 2000
 
     def chat(self, messages: list[Message], system: str | None = None, tools: list[Tool] | None = None,
-             temperature: float | None = None, max_tokens: int | None = None) -> LLMResponse:  # pragma: no cover
+             temperature: float | None = None, max_tokens: int | None = None,
+             json_mode: bool = False) -> LLMResponse:  # pragma: no cover
+        """json_mode=True asks the backend to constrain the reply to a single JSON object (when supported)."""
         raise NotImplementedError
 
     @property
@@ -80,7 +82,7 @@ class NullLLM(LLMClient):
     def enabled(self) -> bool:
         return False
 
-    def chat(self, messages, system=None, tools=None, temperature=None, max_tokens=None) -> LLMResponse:
+    def chat(self, messages, system=None, tools=None, temperature=None, max_tokens=None, json_mode=False) -> LLMResponse:
         return LLMResponse(text="", stop_reason="null")
 
 

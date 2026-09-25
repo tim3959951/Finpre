@@ -152,11 +152,12 @@ class BaseAgent:
         llm_name = "rule-only"
         if self.llm.enabled:
             prompt = P.NARRATE_TEMPLATE.format(
-                name=ctx.name, code=ctx.symbol.code, market=ctx.symbol.market, role=self.role, score=base,
+                name=ctx.name, code=ctx.symbol.code, market=ctx.symbol.market, currency=ctx.symbol.currency,
+                role=self.role, score=base,
                 confidence=conf, signals="\n".join(f"- {s} ({v:+.2f})" for s, v in signals) or "- (無)",
                 evidence=json.dumps(evidence, ensure_ascii=False, indent=1)[:12000])
             try:
-                resp = self.llm.chat([Message("user", prompt)], system=self.persona)
+                resp = self.llm.chat([Message("user", prompt)], system=self.persona, json_mode=True)
                 data = extract_json(resp.text) or {}
                 if data.get("summary"):
                     summary = str(data["summary"])
