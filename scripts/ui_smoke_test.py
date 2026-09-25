@@ -19,7 +19,7 @@ def main() -> None:
     at = AppTest.from_file(APP, default_timeout=600)
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    at.text_input[1].set_value(ticker)          # [0] = sidebar model name, [1] = ticker
+    next(t for t in at.text_input if t.label == "股票代號").set_value(ticker)
     t0 = time.time()
     next(b for b in at.button if b.label == "執行完整分析").click().run()
     assert not at.exception, [e.value for e in at.exception]
