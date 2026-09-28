@@ -13,7 +13,8 @@ from ..evaluation.experiments import ExperimentStore
 from ..features.fundamental_signals import fundamental_view
 from ..features.sentiment import score_headlines
 from ..features.technical_signals import technical_view
-from ..forecasting.registry import SPECS, get_forecaster
+from ..forecasting.base import run_predict
+from ..forecasting.registry import SPECS, get_forecaster, load_trained
 from ..llm.base import Message, extract_json
 from . import prompts as P
 from .base import AnalysisContext, BaseAgent
@@ -82,15 +83,17 @@ class QuantAgent(BaseAgent):
         self.skill_windows = skill_windows
         self.cache = DiskCache(self.settings.resolve_path("evaluation.runs_dir") / "skill_cache", ttl_hours=24)
 
-    def _panel(self, champion: str) -> list[str]:
+    def _panel(self, champion: str, market: str = "TW", horizon: int = 5) -> list[str]:
         if self.panel is not None:
             names = self.panel
         else:
-            names = [champion, "chronos-2", "chronos-bolt-small", "naive"]
+            names = [champion] + list(self.settings.get_path("forecasting.panel",
+                                                             ["chronos-2", "chronos-bolt-small", "naive"]))
         allow_nc = self.settings.get_path("forecasting.allow_noncommercial_models", False)
         out = []
         for n in names:
-            if n in out or (n in SPECS and SPECS[n].trainable):
+            # trainable models join the live panel only once scripts/train_models.py has produced a checkpoint
+            if n in out or (n in SPECS and SPECS[n].trainable and load_trained(n, market, horizon, self.settings) is None):
                 continue
             if n in SPECS and not SPECS[n].commercial_ok and not allow_nc:
                 continue
@@ -105,7 +108,10 @@ class QuantAgent(BaseAgent):
             cfg = BacktestConfig(horizon=ctx.horizon, n_windows=self.skill_windows, step=ctx.horizon,
                                  context_length=int(self.settings.get_path("forecasting.context_length", 512)),
                                  cost_bps=float(self.settings.get_path(f"evaluation.cost_bps.{ctx.symbol.market}", 0)))
-            w, lb = run_backtest({ctx.symbol.code: ctx.prices["close"]}, models, cfg, self.settings)
+            cov = self._covariates(ctx)
+            use = [m for m in models if not (m in SPECS and SPECS[m].covariates) or cov is not None]
+            w, lb = run_backtest({ctx.symbol.code: ctx.prices["close"]}, use, cfg, self.settings,
+                                 covariates={ctx.symbol.code: cov} if cov is not None else None)
             out = {}
             for _, r in lb.iterrows():
                 hits = w[w["model"] == r["model"]]["dir_hit"].to_numpy()
@@ -121,17 +127,42 @@ class QuantAgent(BaseAgent):
             log.warning("skill backtest failed: %s", e)
             return {}
 
+    def _covariates(self, ctx: AnalysisContext):
+        """籌碼/market/FX panel for this ticker, computed once per analysis (None if unavailable)."""
+        if "_cov" not in ctx.__dict__:
+            try:
+                cov = self.provider.covariates(ctx.symbol, ctx.prices)
+                ctx.__dict__["_cov"] = cov if cov is not None and len(cov) == len(ctx.prices) else None
+            except Exception as e:
+                log.warning("covariates unavailable for %s: %s", ctx.symbol.code, e)
+                ctx.__dict__["_cov"] = None
+        return ctx.__dict__["_cov"]
+
     def gather(self, ctx: AnalysisContext):
         h = ctx.horizon
         champion = self.store.champion(ctx.symbol.market, h)
-        models = self._panel(champion)
+        models = self._panel(champion, ctx.symbol.market, h)
+        if champion not in models and self.panel is None:
+            # e.g. a promoted LightGBM champion whose checkpoint hasn't been trained on this machine yet
+            fallback = self.store.default_champion
+            log.warning("champion %s unavailable for %s h=%d (run scripts/train_models.py); using %s",
+                        champion, ctx.symbol.market, h, fallback)
+            champion = fallback
+            if fallback not in models:
+                models.insert(0, fallback)
         ctx_len = int(self.settings.get_path("forecasting.context_length", 512))
         series = ctx.prices["close"].to_numpy()[-ctx_len:]
         last = float(series[-1])
+        cov = self._covariates(ctx)
+        cov_win = [cov.iloc[-(ctx_len + h):]] if cov is not None else None
         forecasts, results = {}, {}
         for m in models:
+            if m in SPECS and SPECS[m].covariates and cov_win is None:
+                continue
             try:
-                fc = get_forecaster(m, h, self.settings).predict([series], h)[0]
+                model = load_trained(m, ctx.symbol.market, h, self.settings) if m in SPECS and SPECS[m].trainable \
+                    else get_forecaster(m, h, self.settings)
+                fc = run_predict(model, [series], h, cov_win)[0]
             except Exception as e:
                 log.warning("forecast %s failed: %s", m, e)
                 continue

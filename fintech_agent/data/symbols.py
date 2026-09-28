@@ -40,6 +40,8 @@ def parse_symbol(text: str, default_market: str | None = None) -> Symbol:
     """
     raw = text.strip()
     t = raw.upper()
+    if "=" in t or t.endswith((".NYB", ".CBT", ".NYM", ".CME")):   # FX (TWD=X), futures, ICE indices (DX-Y.NYB)
+        return Symbol(raw, "US", t, (t,), is_index=True)
     if t.startswith("^"):
         market = "TW" if t in TW_INDEX else "US"
         return Symbol(raw, market, t, (t,), is_index=True)

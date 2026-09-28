@@ -148,7 +148,7 @@ class DLinearForecaster(Forecaster):
         self.net.eval()
         return self
 
-    def predict(self, contexts, horizon):
+    def predict(self, contexts, horizon, covariates=None):
         import torch
         if self.net is None:
             if self.checkpoint and Path(self.checkpoint).exists():
@@ -207,13 +207,32 @@ class LGBMForecaster(Forecaster):
         self.n_jobs = n_jobs if n_jobs is not None else (1 if sys.platform == "darwin" else -1)
         self.models: dict[float, object] = {}
 
-    def fit(self, series):
+    def _features(self, lx: np.ndarray, cov=None, t: int | None = None) -> np.ndarray | None:
+        return _lgbm_features(lx)
+
+    def save(self, path) -> None:
+        import pickle
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as f:
+            pickle.dump({"h": self.h, "models": self.models, "cov_cols": getattr(self, "cov_cols", None)}, f)
+
+    def load(self, path) -> "LGBMForecaster":
+        import pickle
+        with open(path, "rb") as f:
+            d = pickle.load(f)
+        self.h, self.models = d["h"], d["models"]
+        if d.get("cov_cols") is not None:
+            self.cov_cols = d["cov_cols"]
+        return self
+
+    def fit(self, series, covariates=None):
         import lightgbm as lgb
         X, Y = [], []
-        for s in series:
+        for k, s in enumerate(series):
             lx = np.log(np.maximum(clean_context(s), 1e-9))
+            cov = covariates[k] if covariates is not None else None
             for t in range(61, len(lx) - self.h, self.stride):
-                f = _lgbm_features(lx[:t + 1])
+                f = self._features(lx[:t + 1], cov, t)
                 v20 = np.diff(lx[t - 20:t + 1]).std() + 1e-9
                 X.append(f)
                 Y.append((lx[t + self.h] - lx[t]) / (v20 * np.sqrt(self.h)))
@@ -229,13 +248,14 @@ class LGBMForecaster(Forecaster):
             self.models[q] = m
         return self
 
-    def predict(self, contexts, horizon):
+    def predict(self, contexts, horizon, covariates=None):
         if not self.models:
             raise RuntimeError("lgbm is not trained: call fit() (the backtester does this automatically)")
         feats, lasts, vols = [], [], []
-        for c in contexts:
+        for k, c in enumerate(contexts):
             lx = np.log(np.maximum(clean_context(c), 1e-9))
-            feats.append(_lgbm_features(lx))
+            cov = covariates[k] if covariates is not None else None
+            feats.append(self._features(lx, cov, None if cov is None else len(cov) - 1))
             lasts.append(lx[-1])
             vols.append(np.diff(lx[-21:]).std() + 1e-9)
         ok = [f is not None for f in feats]
@@ -255,3 +275,25 @@ class LGBMForecaster(Forecaster):
             res.append(ForecastResult(self.name, qs[0.5].copy(), qs))
             j += 1
         return res
+
+
+class LGBMCovForecaster(LGBMForecaster):
+    """LightGBM quantile model + 籌碼/market/FX covariate features (k-day changes of flows, index, FX)."""
+    name, uses_covariates = "lgbm-cov", True
+
+    def _features(self, lx, cov=None, t=None):
+        from ..data.covariates import covariate_features
+        base = _lgbm_features(lx)
+        if base is None or cov is None:
+            return base
+        if not hasattr(self, "cov_cols"):
+            self.cov_cols = list(cov.columns)
+        c = cov.reindex(columns=self.cov_cols).fillna(0.0)
+        return np.r_[base, covariate_features(c, t)]
+
+    def fit(self, series, covariates=None):
+        if covariates is None:
+            raise ValueError("lgbm-cov needs covariates")
+        cols = sorted(set().union(*[set(c.columns) for c in covariates]))
+        self.cov_cols = cols
+        return super().fit(series, [c.reindex(columns=cols).fillna(0.0) for c in covariates])

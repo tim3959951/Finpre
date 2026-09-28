@@ -1,6 +1,6 @@
 [project]
 name = "fintech-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "Multi-agent AI financial analyst for Taiwan & US markets, powered by Google TimesFM with benchmarked forecasting models"
 requires-python = ">=3.10"
 dependencies = [
@@ -24,6 +24,8 @@ models = [
     "chronos-forecasting>=2.0",
     "statsforecast>=1.7",
     "lightgbm>=4.3",
+    "jax>=0.4.30",        # TimesFM XReg (covariates); the timesfm[xreg] extra pins a CUDA build
+    "jaxlib>=0.4.30",
 ]
 llm = ["anthropic>=0.40", "openai>=1.50"]
 dev = ["pytest>=8"]

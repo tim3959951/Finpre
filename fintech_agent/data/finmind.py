@@ -6,6 +6,7 @@ Works without a token (lower rate limit); set FINMIND_TOKEN for more quota.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date, timedelta
 
 import httpx
@@ -16,9 +17,10 @@ API_URL = "https://api.finmindtrade.com/api/v4/data"
 
 
 class FinMindClient:
-    def __init__(self, token: str | None = None, timeout: float = 20.0):
+    def __init__(self, token: str | None = None, timeout: float = 20.0, max_wait_s: float = 0.0):
         self.token = token or None
         self.timeout = timeout
+        self.max_wait_s = max_wait_s          # >0: wait out the hourly quota instead of giving up (bulk jobs)
 
     def fetch(self, dataset: str, data_id: str | None = None, start: str | date | None = None,
               end: str | date | None = None) -> pd.DataFrame:
@@ -30,13 +32,24 @@ class FinMindClient:
         if end:
             params["end_date"] = str(end)
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
-        try:
-            r = httpx.get(API_URL, params=params, headers=headers, timeout=self.timeout)
-            r.raise_for_status()
-            payload = r.json()
-        except Exception as e:  # network / quota errors should never crash an analysis
-            log.warning("FinMind %s %s failed: %s", dataset, data_id, e)
-            return pd.DataFrame()
+        waited = 0.0
+        while True:
+            try:
+                r = httpx.get(API_URL, params=params, headers=headers, timeout=self.timeout)
+                if r.status_code == 402 or "upper limit" in r.text[:300].lower():
+                    if waited + 60 <= self.max_wait_s:
+                        log.warning("FinMind quota reached; waiting 60s (waited %.0fs)", waited)
+                        time.sleep(60)
+                        waited += 60
+                        continue
+                    log.warning("FinMind quota reached for %s %s — set FINMIND_TOKEN for a higher limit", dataset, data_id)
+                    return pd.DataFrame()
+                r.raise_for_status()
+                payload = r.json()
+                break
+            except Exception as e:  # network / quota errors should never crash an analysis
+                log.warning("FinMind %s %s failed: %s", dataset, data_id, e)
+                return pd.DataFrame()
         if payload.get("status") not in (200, None) or not payload.get("data"):
             if payload.get("msg") and payload.get("msg") != "success":
                 log.warning("FinMind %s %s: %s", dataset, data_id, payload.get("msg"))
@@ -81,6 +94,12 @@ class FinMindClient:
 
     def news(self, code: str, days: int = 7) -> pd.DataFrame:
         return self.fetch("TaiwanStockNews", code, self._ago(days))
+
+    def institutional_range(self, code: str, start: str, end: str | None = None) -> pd.DataFrame:
+        return self.fetch("TaiwanStockInstitutionalInvestorsBuySell", code, start, end)
+
+    def margin_range(self, code: str, start: str, end: str | None = None) -> pd.DataFrame:
+        return self.fetch("TaiwanStockMarginPurchaseShortSale", code, start, end)
 
     def market_institutional(self, days: int = 60) -> pd.DataFrame:
         return self.fetch("TaiwanStockTotalInstitutionalInvestors", None, self._ago(days))

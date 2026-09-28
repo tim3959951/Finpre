@@ -12,8 +12,14 @@ data:
     US: "^VIX"
 
 forecasting:
-  # v1 champion: TimesFM 2.5 (Apache-2.0, commercial use OK)
+  # Default / fallback champion: TimesFM 2.5 (Apache-2.0, commercial use OK)
   champion: timesfm-2.5
+  # Per market x horizon champions from the v0.2 50-stock benchmark (docs/ARCHITECTURE.md §11).
+  # Lookup order: runs/champion.json (local promotions) -> this table -> `champion`.
+  # Trainable champions need `scripts/train_models.py` first; until then the quant agent falls back to `champion`.
+  champions:
+    TW: {5: lgbm-cov, 20: lgbm}
+    US: {5: lgbm, 20: lgbm-cov}
   challengers: [chronos-2, chronos-bolt-small, naive, drift, arima, dlinear, lgbm, ensemble]
   # TimesFM 3.0 weights are NON-COMMERCIAL. Only enable for research comparison.
   allow_noncommercial_models: false
@@ -24,6 +30,9 @@ forecasting:
   horizons: [5, 20]
   quantiles: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
   ensemble_members: [timesfm-2.5, chronos-2, chronos-bolt-small]
+  ensemble_cov_members: [timesfm-2.5, chronos-2-cov, lgbm-cov]
+  # quant agent's live model panel (covariate models are skipped automatically if data is missing)
+  panel: [chronos-2, chronos-2-cov, chronos-bolt-small, naive]
   checkpoints_dir: checkpoints
 
 evaluation:

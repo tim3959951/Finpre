@@ -16,6 +16,7 @@ import pandas as pd
 
 from ..config import Settings, get_settings
 from .cache import DiskCache
+from .covariates import MARKET_SERIES, build_covariates
 from .finmind import FinMindClient
 from .symbols import Symbol, parse_symbol
 from . import summaries as S
@@ -33,6 +34,10 @@ class DataProvider:
     def chips(self, sym: Symbol, prices: pd.DataFrame | None = None) -> dict: ...
     def news(self, sym: Symbol, limit: int = 15) -> list[dict]: ...
     def market_context(self, market: str) -> dict: ...
+
+    def covariates(self, sym: Symbol, prices: pd.DataFrame | None = None) -> pd.DataFrame:
+        """Daily covariate panel aligned with `prices` (see data/covariates.py). Empty if unavailable."""
+        return pd.DataFrame()
 
     def symbol(self, text: str) -> Symbol:
         return parse_symbol(text)
@@ -229,6 +234,24 @@ class LiveDataProvider(DataProvider):
             return uniq[:limit]
         return self.cache.obj(f"news_{sym.code}_{datetime.now():%Y%m%d%H}", load) or []
 
+    # ---------------------------------------------------------------- covariates (籌碼 / market / FX)
+    def covariates(self, sym: Symbol, prices: pd.DataFrame | None = None) -> pd.DataFrame:
+        prices = prices if prices is not None else self.prices(sym)
+        if prices is None or len(prices) < 60 or sym.is_index:
+            return pd.DataFrame()
+        closes = {}
+        for ticker, _ in MARKET_SERIES.get(sym.market, {}).values():
+            px = self.prices(parse_symbol(ticker), years=self.years + 1)
+            if len(px):
+                closes[ticker] = px["close"]
+        inst = margin = None
+        if sym.market == "TW":
+            start = (prices.index[0] - pd.Timedelta(days=90)).date().isoformat()
+            end = prices.index[-1].date().isoformat()
+            inst = self.cache.frame(f"inst_hist_{sym.code}_{start}_{end}", lambda: self.fm.institutional_range(sym.code, start, end))
+            margin = self.cache.frame(f"margin_hist_{sym.code}_{start}_{end}", lambda: self.fm.margin_range(sym.code, start, end))
+        return build_covariates(prices, sym.market, closes, inst, margin)
+
     # ---------------------------------------------------------------- market context
     def market_context(self, market: str) -> dict:
         out: dict[str, Any] = {}
@@ -313,6 +336,14 @@ class SyntheticProvider(DataProvider):
     def news(self, sym: Symbol, limit: int = 15) -> list[dict]:
         return [{"date": "2026-01-01", "title": f"{sym.code} 營收創新高，法人看好後市", "source": "synthetic"},
                 {"date": "2026-01-02", "title": f"{sym.code} faces margin pressure amid weak demand", "source": "synthetic"}][:limit]
+
+    def covariates(self, sym: Symbol, prices: pd.DataFrame | None = None) -> pd.DataFrame:
+        prices = prices if prices is not None else self.prices(sym)
+        rng = self._rng(sym)
+        n = len(prices)
+        mkt = 0.6 * np.log(prices["close"].to_numpy() / prices["close"].iloc[0]) + np.cumsum(rng.normal(0, 0.008, n))
+        closes = {"^TWII" if sym.market == "TW" else "^GSPC": pd.Series(np.exp(mkt) * 100, index=prices.index)}
+        return build_covariates(prices, sym.market, closes)
 
     def market_context(self, market: str) -> dict:
         return {"index": {"symbol": "^TWII" if market == "TW" else "^GSPC", "ret_20d_pct": 1.2,

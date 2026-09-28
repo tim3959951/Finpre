@@ -32,6 +32,7 @@ class ExperimentStore:
         self.path = path or self.dir / "experiments.sqlite"
         self.champion_file = self.dir / "champion.json"
         self.default_champion = s.get_path("forecasting.champion", "timesfm-2.5")
+        self.configured_champions = s.get_path("forecasting.champions", {}) or {}
         with self._conn() as c:
             c.executescript(SCHEMA)
 
@@ -66,7 +67,12 @@ class ExperimentStore:
         return {}
 
     def champion(self, market: str, horizon: int) -> str:
-        return self.champions().get(market, {}).get(str(horizon), {}).get("model", self.default_champion)
+        """Local promotion (runs/champion.json) > `forecasting.champions` in settings > `forecasting.champion`."""
+        local = self.champions().get(market, {}).get(str(horizon), {}).get("model")
+        if local:
+            return local
+        cfg = self.configured_champions.get(market) or {}
+        return cfg.get(horizon) or cfg.get(str(horizon)) or self.default_champion
 
     def set_champion(self, market: str, horizon: int, model: str, reason: str, run_id: str | None = None) -> None:
         ch = self.champions()

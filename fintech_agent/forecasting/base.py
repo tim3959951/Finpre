@@ -65,15 +65,30 @@ class Forecaster:
     license: str = "Apache-2.0"
     commercial_ok: bool = True
     trainable: bool = False
+    uses_covariates: bool = False     # True -> predict(..., covariates=[DataFrame per context]) / fit(..., covariates=)
 
-    def fit(self, series: list[np.ndarray]) -> "Forecaster":
+    def fit(self, series: list[np.ndarray], covariates: list | None = None) -> "Forecaster":
         return self
 
-    def predict(self, contexts: list[np.ndarray], horizon: int) -> list[ForecastResult]:  # pragma: no cover
+    def predict(self, contexts: list[np.ndarray], horizon: int, covariates: list | None = None
+                ) -> list[ForecastResult]:  # pragma: no cover
         raise NotImplementedError
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<{self.__class__.__name__} {self.name}>"
+
+
+def run_predict(fc: "Forecaster", contexts: list[np.ndarray], horizon: int, covariates: list | None = None
+                ) -> list[ForecastResult]:
+    """Call a forecaster, handing covariates only to models that use them.
+
+    covariates[i] is a DataFrame whose *last* rows align with contexts[i] (it may hold extra earlier rows,
+    which lagged-covariate models such as TimesFM XReg need)."""
+    if getattr(fc, "uses_covariates", False):
+        if covariates is None:
+            raise ValueError(f"{fc.name} needs covariates")
+        return fc.predict(contexts, horizon, covariates=covariates)
+    return fc.predict(contexts, horizon)
 
 
 def clean_context(x: np.ndarray, max_len: int | None = None) -> np.ndarray:

@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 import pandas as pd
 
-from ..forecasting.base import Forecaster
+from ..forecasting.base import Forecaster, run_predict
 from ..forecasting.registry import get_forecaster
 from .metrics import leaderboard, window_metrics
 
@@ -45,9 +45,21 @@ def make_origins(n: int, cfg: BacktestConfig, index: pd.DatetimeIndex | None = N
 
 
 def run_backtest(prices: dict[str, pd.Series], models: list[str] | dict[str, Forecaster], cfg: BacktestConfig,
-                 settings=None, progress=None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Returns (per-window rows, leaderboard)."""
+                 settings=None, progress=None, covariates: dict[str, pd.DataFrame] | None = None
+                 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Returns (per-window rows, leaderboard).
+
+    covariates: optional {ticker: DataFrame aligned with prices[ticker].index}. Covariate-aware models only see
+    rows strictly before each forecast origin (plus `horizon` extra earlier rows for lagged-covariate models).
+    """
     series = {t: s.dropna().astype(float) for t, s in prices.items() if len(s.dropna()) > cfg.min_context + cfg.horizon}
+    covs: dict[str, pd.DataFrame] = {}
+    if covariates:
+        cols = sorted(set().union(*[set(c.columns) for t, c in covariates.items() if t in series and len(c)]))
+        for t, s in series.items():
+            c = covariates.get(t)
+            covs[t] = (c if c is not None else pd.DataFrame(index=s.index)).reindex(index=s.index, columns=cols)\
+                .ffill().fillna(0.0)
     plan: list[tuple[str, int]] = []
     for t, s in series.items():
         plan += [(t, o) for o in make_origins(len(s), cfg, s.index)]
@@ -56,6 +68,8 @@ def run_backtest(prices: dict[str, pd.Series], models: list[str] | dict[str, For
     earliest = min(series[t].index[o] for t, o in plan)
     contexts = [series[t].to_numpy()[max(0, o - cfg.context_length):o] for t, o in plan]
     actuals = [series[t].to_numpy()[o:o + cfg.horizon] for t, o in plan]
+    cov_windows = ([covs[t].iloc[max(0, o - cfg.context_length - cfg.horizon):o] for t, o in plan]
+                   if covs else None)
 
     if isinstance(models, dict):
         forecasters = models
@@ -63,15 +77,29 @@ def run_backtest(prices: dict[str, pd.Series], models: list[str] | dict[str, For
         forecasters = {m: get_forecaster(m, cfg.horizon, settings) for m in models}
 
     rows = []
+    done: dict[str, list] = {}          # model name -> predictions (ensembles reuse their members' forecasts)
     for k, (name, fc) in enumerate(forecasters.items()):
         if progress:
             progress(k, len(forecasters), name)
+        if getattr(fc, "uses_covariates", False) and not covs:
+            log.warning("skipping %s: no covariates supplied", name)
+            continue
         t0 = time.time()
         try:
-            if getattr(fc, "trainable", False):
-                train = [s[s.index < earliest].to_numpy() for s in series.values()]
-                fc.fit([x for x in train if len(x) > 200])
-            preds = fc.predict(contexts, cfg.horizon)
+            reuse = getattr(fc, "members", None) and all(m.name in done for m in fc.members)
+            if getattr(fc, "trainable", False) and not reuse:
+                keep = [t for t, s in series.items() if (s.index < earliest).sum() > 200]
+                train = [series[t][series[t].index < earliest].to_numpy() for t in keep]
+                if getattr(fc, "uses_covariates", False):
+                    fc.fit(train, [covs[t][covs[t].index < earliest] for t in keep])
+                else:
+                    fc.fit(train)
+            members = getattr(fc, "members", None)
+            if members and all(m.name in done for m in members):
+                preds = fc.combine([done[m.name] for m in members])
+            else:
+                preds = run_predict(fc, contexts, cfg.horizon, cov_windows)
+            done[name] = preds
         except Exception as e:
             log.exception("model %s failed: %s", name, e)
             continue

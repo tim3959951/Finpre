@@ -6,7 +6,7 @@ import logging
 
 import numpy as np
 
-from .base import QUANTILES, Forecaster, ForecastResult, clean_context
+from .base import QUANTILES, Forecaster, ForecastResult, clean_context, run_predict
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class NaiveForecaster(Forecaster):
     """Random walk: tomorrow = today. Quantiles from empirical k-step return distribution."""
     name, family = "naive", "baseline"
 
-    def predict(self, contexts, horizon):
+    def predict(self, contexts, horizon, covariates=None):
         res = []
         for c in contexts:
             x = clean_context(c)
@@ -60,7 +60,7 @@ class DriftForecaster(Forecaster):
     def __init__(self, lookback: int = 252):
         self.lookback = lookback
 
-    def predict(self, contexts, horizon):
+    def predict(self, contexts, horizon, covariates=None):
         res = []
         for c in contexts:
             x = clean_context(c)
@@ -82,7 +82,7 @@ class ArimaForecaster(Forecaster):
         self.max_context = max_context
         self._fallback = NaiveForecaster()
 
-    def predict(self, contexts, horizon):
+    def predict(self, contexts, horizon, covariates=None):
         try:
             from statsforecast.models import AutoARIMA
         except ImportError:
@@ -110,13 +110,25 @@ class EnsembleForecaster(Forecaster):
     """Median of member point forecasts; quantiles averaged across members (Vincentization)."""
     name, family = "ensemble", "ensemble"
 
-    def __init__(self, members: list[Forecaster]):
-        self.members = members
+    def __init__(self, members: list[Forecaster], name: str = "ensemble"):
+        self.members, self.name = members, name
         self.commercial_ok = all(m.commercial_ok for m in members)
+        self.uses_covariates = any(getattr(m, "uses_covariates", False) for m in members)
+        self.trainable = any(getattr(m, "trainable", False) for m in members)
 
-    def predict(self, contexts, horizon):
-        per_model = [m.predict(contexts, horizon) for m in self.members]
+    def fit(self, series, covariates=None):
+        for m in self.members:
+            if getattr(m, "trainable", False):
+                m.fit(series, covariates) if getattr(m, "uses_covariates", False) else m.fit(series)
+        return self
+
+    def predict(self, contexts, horizon, covariates=None):
+        return self.combine([run_predict(m, contexts, horizon, covariates) for m in self.members])
+
+    def combine(self, per_model: list[list[ForecastResult]]) -> list[ForecastResult]:
+        """Combine member forecasts (same windows, same order) — lets a backtest reuse member predictions."""
         out = []
+        contexts = per_model[0]
         for i in range(len(contexts)):
             rs = [pm[i] for pm in per_model]
             point = np.median(np.stack([r.point for r in rs]), axis=0)
