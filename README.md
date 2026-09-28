@@ -1,6 +1,6 @@
 # Fintech Agent — TimesFM 驅動的多代理 AI 投資分析系統
 
-台灣 + 美國市場。四個 Agent 協作：**技術分析師**、**基本面／籌碼／情緒分析師**、**量化 ML 工程師**（TimesFM 2.5 為 v1 基準 champion；v0.2 的 50 檔回測後，由加入籌碼共變數的本地 LightGBM 接任 champion，Chronos-2 / TimesFM 3.0 等持續當 challenger，可做 A/B 測試與模型切換），由 **首席投資顧問** 統籌做最終決策並與客戶對話。
+台灣 + 美國市場。四個 Agent 協作：**技術分析師**、**基本面／籌碼／情緒分析師**、**量化 ML 工程師**（TimesFM 2.5 為 v1 基準；2018–2026 回測後由每月重訓的 LightGBM 擔任各市場 champion，Chronos-2 / TimesFM 3.0 等持續當 challenger，另有台股選股排序模型），由 **首席投資顧問** 統籌做最終決策並與客戶對話。
 
 詳細設計見 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
@@ -34,24 +34,39 @@ python scripts/benchmark.py --universe tw50 --horizon 5 --windows 60 --min-origi
   --models naive timesfm-2.5 timesfm-2.5-xreg chronos-2 chronos-2-cov lgbm lgbm-cov ensemble ensemble-cov
 # 各市場整合結果成 markdown 表格
 python scripts/summarize_benchmarks.py TW:5:logs/b50_tw50_h5.csv US:5:logs/b50_us50_h5.csv
+# 2018 → 今天、LightGBM 每月重訓（LightGBM 單獨一個程序才能開多執行緒）
+FA_LGBM_JOBS=4 OMP_NUM_THREADS=4 python scripts/benchmark.py --universe tw50 --horizon 5 \
+  --models naive drift lgbm lgbm-cov --years 13 --min-origin 2018-01-01 --windows 100000 --retrain M --out logs/lh_tw50_h5_ml.csv
+
+# 選股排序：逐日選出上市流動性前 50，回測 + 產生今日排名（量化 Agent 會讀取）
+python scripts/rank_stocks.py --pool twse --pit-top 50 --horizon 5 --backtest --start 2018-01-01 --out logs/rank_twpit_h5
+python scripts/rank_stocks.py --pool twse --pit-top 50 --horizon 5          # 每日盤後更新排名
+
+# 所有 benchmark 圖表 → docs/benchmarks/v0.3/（PNG + chart_data.json）
+python scripts/export_benchmark_charts.py && python scripts/plot_benchmarks.py
 
 # 訓練本地模型（量化 Agent 會自動載入 checkpoints/；LightGBM 每個約 5–15 秒）
-python scripts/train_models.py --universe tw50 --models lgbm lgbm-cov --horizons 5 20
-python scripts/train_models.py --universe us50 --models lgbm lgbm-cov --horizons 5 20
+python scripts/train_models.py --universe tw50 --models lgbm --horizons 5 20 --years 13
+python scripts/train_models.py --universe us50 --models lgbm --horizons 5 20 --years 13
 python scripts/train_models.py --universe us50 --models dlinear --horizons 20 --epochs 20   # M2 GPU (MPS)
 ```
 
-Champion 查找順序：本機升級紀錄 `runs/champion.json` → `settings.yaml` 的 `forecasting.champions`（v0.2 的回測結果）→ 預設 `forecasting.champion`（TimesFM 2.5）。若 champion 是 LightGBM 但本機尚未訓練 checkpoint，量化 Agent 會自動退回 TimesFM 2.5 並在 log 提示執行 `train_models.py`。
+Champion 查找順序：本機升級紀錄 `runs/champion.json` → `settings.yaml` 的 `forecasting.champions`（v0.3：四組都是 `lgbm`）→ 預設 `forecasting.champion`（TimesFM 2.5）。若 champion 是 LightGBM 但本機尚未訓練 checkpoint，量化 Agent 會自動退回 TimesFM 2.5 並在 log 提示執行 `train_models.py`。
 
-### v0.2 結果摘要（台股 50 + 美股 50 檔，2025-10 → 2026-09，CRPS 相對 random walk）
+### v0.3 結果摘要（2018-01 → 2026-09，CRPS 相對 random walk，LightGBM 每月重訓）
 
 | | 台股 5 日 | 台股 20 日 | 美股 5 日 | 美股 20 日 |
 |---|---|---|---|---|
-| 最佳模型 | **lgbm-cov +3.4%**（72% 個股勝出，p=0.003） | **lgbm +3.6%**（80%，p<0.001） | lgbm +0.5%（不顯著） | lgbm-cov +0.8%（不顯著） |
-| TimesFM 2.5 | −0.3% | −1.6% | −2.3% | −4.0% |
-| Chronos-2 | −0.5% | −0.9% | −1.7% | 0.0% |
+| **LightGBM** | **+1.8%**（49/50 檔勝出） | **+3.0%**（44/50） | **+0.8%**（48/50） | **+0.6%**（37/50） |
+| LightGBM＋籌碼／大盤／匯率 | +0.7% | +1.4% | −0.2% | −1.6% |
+| TimesFM 2.5 | −1.0% | −1.6% | −2.1% | −3.3% |
+| Chronos-2 | −1.3% | −0.5% | −1.9% | −1.7% |
 
-台股比美股更有可預測結構；籌碼共變數只對「本地訓練」的 LightGBM 有幫助（台股 5 日 IC 由 0.01 升到 0.11），對 zero-shot 基礎模型反而有害。完整表格與解讀見 `docs/ARCHITECTURE.md` §11，原始報告在 `docs/benchmarks/v0.2/`。
+- 台股選股排序（每天依成交值選出上市前 50）：LightGBM＋籌碼每週 IC 0.030（t = 3.4），前 10 名未扣成本每年多約 9%，扣 58.5 bps 牌價成本後與等權持有打平。
+- 用「現行台灣 50」回測會嚴重高估動能策略（存活者偏差）；逐日選股後動能 IC 為負。
+- 圖表：`docs/benchmarks/v0.3/*.png`；完整解讀見 `docs/ARCHITECTURE.md` §11。
+
+![各年度 CRPS skill](docs/benchmarks/v0.3/02_long_skill_by_year.png)
 
 | 模型 | 類型 | 授權 | 備註 |
 |---|---|---|---|
@@ -60,9 +75,9 @@ Champion 查找順序：本機升級紀錄 `runs/champion.json` → `settings.ya
 | `chronos-2` / `chronos-bolt-small` / `chronos-bolt-base` | 基礎模型 | Apache-2.0 | Amazon |
 | `tirex` | 基礎模型 | NXAI 社群授權 | 選配：`pip install tirex-ts` |
 | `naive` / `drift` / `arima` | 統計基準 | – | naive（random walk）是必須打敗的基準 |
-| `dlinear` / `lgbm` | 本地訓練 | – | DLinear 在 MPS 上訓練；LightGBM 分位數迴歸（**v0.2 champion：台股 20 日、美股 5 日**）|
+| `dlinear` / `lgbm` | 本地訓練 | – | DLinear 在 MPS 上訓練；LightGBM 分位數迴歸（**v0.3 champion：四組市場／天期**）|
 | `ensemble` | 集成 | – | 成員見 `forecasting.ensemble_members` |
-| `chronos-2-cov` / `timesfm-2.5-xreg` / `lgbm-cov` / `ensemble-cov` | 共變數版 | 同原模型 | 加入三大法人、融資、大盤、費半、匯率（美股：S&P 500、VIX、利率、美元）；**lgbm-cov 為 v0.2 champion：台股 5 日、美股 20 日** |
+| `chronos-2-cov` / `timesfm-2.5-xreg` / `lgbm-cov` / `ensemble-cov` | 共變數版 | 同原模型 | 加入三大法人、融資、大盤、費半、匯率（美股：S&P 500、VIX、利率、美元）；長期回測中不如不含共變數的版本 |
 | `timesfm-3.0-cov` | 共變數版 | **非商用** | 僅研究比較 |
 
 ## 專案結構
@@ -75,8 +90,9 @@ fintech_agent/
   evaluation/    walk-forward 回測、指標、Diebold-Mariano A/B、實驗紀錄與 champion registry、shadow 線上 A/B
   llm/           可插拔 LLM（Anthropic / OpenAI 相容 / Ollama / 規則模式）+ tool-calling loop
   agents/        三位專家 + 首席投資顧問（調度、決策、對話）
+  ranking/       選股排序：橫斷面特徵、LightGBM 排序器、因子基準、排序回測
   ui/            Streamlit 介面
-scripts/         analyze / benchmark / summarize_benchmarks / train_models
+scripts/         analyze / benchmark / rank_stocks / train_models / summarize_benchmarks / export_benchmark_charts / plot_benchmarks
 config/settings.yaml
 ```
 

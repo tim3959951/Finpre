@@ -173,7 +173,21 @@ with tab_stock:
 
 # ============================================================================ model lab
 with tab_lab:
-    st.caption("Walk-forward 回測 + champion/challenger A/B 檢定。TimesFM 2.5 為 v1 champion；naive (random walk) 是必須打敗的基準。")
+    st.caption("Walk-forward 回測 + champion/challenger A/B 檢定。Champion 依市場 × 天數分開管理（見 settings.yaml）；naive (random walk) 是必須打敗的基準。")
+    with st.expander("選股排序（最新排名與歷史回測）", expanded=False):
+        runs_dir = S.resolve_path("evaluation.runs_dir")
+        snaps = sorted(runs_dir.glob("ranking_*_h*.json"))
+        snaps = [p for p in snaps if not p.name.startswith("ranking_backtest_")]
+        if not snaps:
+            st.info("尚未產生排名：執行 `python scripts/rank_stocks.py --pool twse --pit-top 50 --horizon 20`。")
+        else:
+            pick = st.selectbox("排名檔", [p.name for p in snaps])
+            snap = json.loads((runs_dir / pick).read_text())
+            bt = snap.get("backtest") or {}
+            st.markdown(f"**{snap['model']}**・{snap['universe']}・{snap['horizon']} 日・資料日期 {snap['as_of']}　"
+                        f"回測 IC {bt.get('ic_mean', float('nan')):+.3f}（t={bt.get('ic_t', float('nan')):.1f}）")
+            st.dataframe(pd.DataFrame(snap["ranks"]), width="stretch", hide_index=True)
+            st.caption("排名僅供研究；前 10 名不是買進建議。")
     store = ExperimentStore(S)
     specs = list_models(S)
     c1, c2, c3 = st.columns([2, 3, 2])
@@ -252,7 +266,7 @@ with tab_about:
 **首席投資顧問 Agent** 調度三位專家（平行執行），再以信心加權 + LLM 判斷做最終決策：
 - **技術分析師**：均線、MACD、KD、RSI、布林、ADX、ATR、量價、支撐壓力
 - **基本面／籌碼／情緒分析師**：月營收、EPS、本益比百分位、三大法人、融資券、外資持股、新聞情緒、大盤行情
-- **量化 ML 工程師**：TimesFM 2.5（champion）+ Chronos-2 / Bolt + 統計基準，含此標的即時回測與模型技能折減
+- **量化 ML 工程師**：各市場 champion（LightGBM / TimesFM 2.5）+ Chronos-2 / Bolt + 統計基準，含此標的即時回測與模型技能折減，以及選股排序模型的橫斷面排名
 
 每位專家都是「規則引擎算分（可稽核）→ LLM 解讀並在 ±0.5 內調整」，沒有 LLM 時仍可運作（規則模式）。
 """)

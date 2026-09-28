@@ -24,7 +24,7 @@ MARKET_SERIES = {
            "dxy_lvl": ("DX-Y.NYB", True)},
 }
 INSTITUTION_GROUP = {"Foreign_Investor": "foreign", "Foreign_Dealer_Self": "foreign", "Investment_Trust": "trust",
-                     "Dealer_self": "dealer", "Dealer_Hedging": "dealer"}
+                     "Dealer_self": "dealer", "Dealer_Hedging": "dealer", "Dealer": "dealer"}  # "Dealer" before 2014-12
 
 
 def align_series(s: pd.Series, index: pd.DatetimeIndex, strictly_before: bool) -> pd.Series:
@@ -92,6 +92,21 @@ def covariate_features(cov: pd.DataFrame, t: int, lags=(1, 5, 20)) -> np.ndarray
         else:
             feats.append(col[t])
     return np.asarray(feats, dtype=np.float64)
+
+
+def covariate_feature_matrix(cov: pd.DataFrame, lags=(1, 5, 20)) -> np.ndarray:
+    """Vectorised `covariate_features` for every row (row t == covariate_features(cov, t))."""
+    n = len(cov)
+    cols = []
+    for c in cov.columns:
+        col = cov[c].to_numpy(dtype=np.float64)
+        if c.endswith("_lvl"):
+            for k in lags:
+                prev = col[np.maximum(0, np.arange(n) - k)]
+                cols.append(col - prev)
+        else:
+            cols.append(col)
+    return np.column_stack(cols) if cols else np.zeros((n, 0))
 
 
 def lagged_window(cov: pd.DataFrame, n_rows: int) -> pd.DataFrame:

@@ -7,6 +7,8 @@ Examples
   python scripts/benchmark.py --market TW --min-origin 2025-10-01 --promote     # post-release test, update champion
   python scripts/benchmark.py --universe tw50 --models timesfm-2.5 chronos-2 chronos-2-cov lgbm lgbm-cov naive \
       --min-origin 2025-10-01                     # 50 stocks + 籌碼/market/FX covariates
+  FA_LGBM_JOBS=8 python scripts/benchmark.py --universe tw50 --models naive drift lgbm lgbm-cov --years 13 \
+      --min-origin 2018-01-01 --windows 100000 --retrain M     # 2018→today, LightGBM refit every month
 """
 from __future__ import annotations
 
@@ -26,6 +28,7 @@ from fintech_agent.data import LiveDataProvider  # noqa: E402
 from fintech_agent.evaluation.abtest import compare  # noqa: E402
 from fintech_agent.evaluation.backtest import BacktestConfig, run_backtest  # noqa: E402
 from fintech_agent.evaluation.experiments import ExperimentStore  # noqa: E402
+from fintech_agent.evaluation.regimes import skill_by_period  # noqa: E402
 from fintech_agent.data.universe import UNIVERSES  # noqa: E402
 from fintech_agent.forecasting.registry import SPECS  # noqa: E402
 
@@ -73,6 +76,10 @@ def main() -> None:
     ap.add_argument("--step", type=int, default=None)
     ap.add_argument("--context", type=int, default=None)
     ap.add_argument("--min-origin", default=None)
+    ap.add_argument("--max-origin", default=None)
+    ap.add_argument("--years", type=float, default=None, help="price history to load (default data.history_years)")
+    ap.add_argument("--retrain", default=None, choices=["M", "Q"], help="refit trainable models monthly/quarterly")
+    ap.add_argument("--train-years", type=float, default=None, help="rolling training window for --retrain")
     ap.add_argument("--metric", default=None, help="A/B loss per window (default: evaluation.ab_metric = crps)")
     ap.add_argument("--promote", action="store_true", help="update champion if a challenger wins the A/B test")
     ap.add_argument("--out", default=None, help="write per-window CSV here")
@@ -83,6 +90,8 @@ def main() -> None:
     args.metric = args.metric or s.get_path("evaluation.ab_metric", "crps_rel")
     prov = LiveDataProvider(s)
     prov.fm.max_wait_s = 3600                    # bulk job: wait out FinMind's hourly quota instead of skipping
+    if args.years:
+        prov.years = args.years
     if args.universe:
         args.market, tickers = UNIVERSES[args.universe]
     else:
@@ -107,12 +116,17 @@ def main() -> None:
         print(f"  {t}: {len(px)} bars {px.index[0].date()} → {px.index[-1].date()}{extra}", flush=True)
     cfg = BacktestConfig(horizon=args.horizon, n_windows=args.windows, step=args.step or args.horizon,
                          context_length=args.context or int(s.get_path("forecasting.context_length", 512)),
-                         min_origin=args.min_origin, cost_bps=float(s.get_path(f"evaluation.cost_bps.{args.market}", 0)))
+                         min_origin=args.min_origin, max_origin=args.max_origin, retrain=args.retrain,
+                         train_years=args.train_years,
+                         cost_bps=float(s.get_path(f"evaluation.cost_bps.{args.market}", 0)))
     t0 = time.time()
     w, lb = run_backtest(prices, args.models, cfg, s,
                          progress=lambda k, n, m: print(f"[{k + 1}/{n}] {m} …", flush=True),
                          covariates=covs or None)
     print(f"\nfinished in {time.time() - t0:.0f}s · train cutoff for trainable models: {lb.attrs['train_cutoff']}\n")
+    if args.out:                                   # save first: nothing below may lose a long run
+        w.to_csv(args.out, index=False)
+        print(f"per-window rows → {args.out}")
     pd.set_option("display.width", 220)
     pd.set_option("display.max_columns", 30)
     cols = [c for c in ["model", "n_windows", "crps_rel", "crps_skill", "mase", "skill_vs_naive", "mape", "dir_acc", "ic", "cov80",
@@ -126,6 +140,28 @@ def main() -> None:
         if per_ticker["sector"] is not None:
             print("\nMedian CRPS skill vs naive by sector (%, sectors with >=3 tickers):")
             print(per_ticker["sector"].to_string())
+
+    from fintech_agent.data import parse_symbol
+    from fintech_agent.evaluation.regimes import market_regime
+    try:
+        idx_close = prov.prices(parse_symbol(s.get_path(f"data.market_index.{args.market}", "^TWII")))["close"]
+        regime = market_regime(idx_close)
+    except Exception as e:  # pragma: no cover - network
+        print(f"regime labels unavailable: {e}")
+        regime = None
+    try:
+        periods = skill_by_period(w, regime, args.market)
+    except Exception as e:  # pragma: no cover - reporting must never kill a finished run
+        print(f"period breakdown failed: {e}")
+        periods = {}
+    if "year" in periods:
+        py = pd.DataFrame(periods["year"]).pivot(index="year", columns="model", values="crps_skill_pct")
+        print("\nCRPS skill vs naive by year (%):")
+        print(py.round(2).to_string())
+    if "regime" in periods:
+        pr = pd.DataFrame(periods["regime"]).pivot(index="regime", columns="model", values="crps_skill_pct")
+        print("\nCRPS skill vs naive by market regime (%):")
+        print(pr.round(2).to_string())
 
     store = ExperimentStore(s)
     run_id = store.log_run("benchmark", args.market, args.horizon, list(prices), args.models, cfg.__dict__, lb)
@@ -158,9 +194,6 @@ def main() -> None:
                 cov_ab.append(r)
                 print(f"  {c:18s} vs {b:14s} Δ={r.improvement_pct:+6.2f}%  p={r.dm_p:.3f}  "
                       f"win={r.ticker_win_rate:.0%}  → {'covariates help' if r.decision == 'promote' else 'covariates hurt' if r.decision == 'keep' else 'no significant difference'}")
-    if args.out:
-        w.to_csv(args.out, index=False)
-        print(f"per-window rows → {args.out}")
     baselines = {"naive", "drift"} if not s.get_path("evaluation.promote_baselines", False) else set()
     if not s.get_path("forecasting.allow_noncommercial_models", False):   # e.g. TimesFM 3.0 weights
         baselines |= {n for n, sp in SPECS.items() if not sp.commercial_ok}
@@ -180,7 +213,8 @@ def main() -> None:
                                   json.loads(per_ticker["sector"].reset_index().to_json(orient="records")),
                                   "leaderboard": json.loads(lb.to_json(orient="records")),
                                   "ab": [r.to_dict() for r in results],
-                                  "covariate_ab": [r.to_dict() for r in cov_ab]}, ensure_ascii=False, indent=1, default=str))
+                                  "covariate_ab": [r.to_dict() for r in cov_ab],
+                                  "by_period": periods}, ensure_ascii=False, indent=1, default=str))
     print(f"report → {report}")
 
 

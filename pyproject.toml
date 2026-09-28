@@ -1,6 +1,6 @@
 [project]
 name = "fintech-agent"
-version = "0.2.0"
+version = "0.3.0"
 description = "Multi-agent AI financial analyst for Taiwan & US markets, powered by Google TimesFM with benchmarked forecasting models"
 requires-python = ">=3.10"
 dependencies = [
@@ -28,7 +28,7 @@ models = [
     "jaxlib>=0.4.30",
 ]
 llm = ["anthropic>=0.40", "openai>=1.50"]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "matplotlib>=3.8"]
 
 [build-system]
 requires = ["setuptools>=68"]

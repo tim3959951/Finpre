@@ -8,6 +8,7 @@ Both are scale-free (inputs normalised by recent volatility) so one model is tra
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -203,11 +204,13 @@ class LGBMForecaster(Forecaster):
     def __init__(self, horizon: int = 5, n_estimators: int = 200, stride: int = 2, seed: int = 0,
                  n_jobs: int | None = None):
         self.h, self.n_est, self.stride, self.seed = horizon, n_estimators, stride, seed
-        # macOS: LightGBM's libomp and PyTorch's bundled libomp segfault when both run threaded in one process
-        self.n_jobs = n_jobs if n_jobs is not None else (1 if sys.platform == "darwin" else -1)
+        # macOS: LightGBM's libomp and PyTorch's bundled libomp deadlock/segfault when both run threaded in one
+        # process -> single-threaded by default; FA_LGBM_JOBS=8 speeds up LightGBM-only jobs (rolling backtests).
+        env_jobs = os.environ.get("FA_LGBM_JOBS")
+        self.n_jobs = n_jobs if n_jobs is not None else int(env_jobs) if env_jobs else (1 if sys.platform == "darwin" else -1)
         self.models: dict[float, object] = {}
 
-    def _features(self, lx: np.ndarray, cov=None, t: int | None = None) -> np.ndarray | None:
+    def _features(self, lx: np.ndarray, cov=None, t: int | None = None, cov_matrix=None) -> np.ndarray | None:
         return _lgbm_features(lx)
 
     def save(self, path) -> None:
@@ -225,20 +228,38 @@ class LGBMForecaster(Forecaster):
             self.cov_cols = d["cov_cols"]
         return self
 
-    def fit(self, series, covariates=None):
-        import lightgbm as lgb
-        X, Y = [], []
+    def build_rows(self, series, covariates=None):
+        """Training rows for every (series k, time t): features use data up to t, target is the vol-scaled
+        h-step log return from t. Returns X, Y, k (series index) and t_end (= t + h, index of the target day)
+        so a rolling backtest can build the rows once and refit on `t_end < cutoff` each month."""
+        X, Y, K, T = [], [], [], []
         for k, s in enumerate(series):
             lx = np.log(np.maximum(clean_context(s), 1e-9))
             cov = covariates[k] if covariates is not None else None
+            cm = self._cov_matrix(cov)
             for t in range(61, len(lx) - self.h, self.stride):
-                f = self._features(lx[:t + 1], cov, t)
+                f = self._features(lx[:t + 1], cov, t, cm)
+                if f is None:
+                    continue
                 v20 = np.diff(lx[t - 20:t + 1]).std() + 1e-9
                 X.append(f)
                 Y.append((lx[t + self.h] - lx[t]) / (v20 * np.sqrt(self.h)))
-        X, Y = np.asarray(X), np.asarray(Y)
+                K.append(k)
+                T.append(t + self.h)
+        return np.asarray(X), np.asarray(Y), np.asarray(K, int), np.asarray(T, int)
+
+    def _cov_matrix(self, cov):
+        return None
+
+    def fit(self, series, covariates=None):
+        X, Y, _, _ = self.build_rows(series, covariates)
+        return self.fit_rows(X, Y)
+
+    def fit_rows(self, X, Y):
+        import lightgbm as lgb
         if len(X) < 200:
             raise ValueError(f"lgbm: only {len(X)} training rows")
+        self.models = {}
         for q in QUANTILES:
             m = lgb.LGBMRegressor(objective="quantile", alpha=q, n_estimators=self.n_est, learning_rate=0.03,
                                   num_leaves=15, min_child_samples=40, subsample=0.8, subsample_freq=1,
@@ -281,19 +302,26 @@ class LGBMCovForecaster(LGBMForecaster):
     """LightGBM quantile model + 籌碼/market/FX covariate features (k-day changes of flows, index, FX)."""
     name, uses_covariates = "lgbm-cov", True
 
-    def _features(self, lx, cov=None, t=None):
+    def _cov_matrix(self, cov):
+        from ..data.covariates import covariate_feature_matrix
+        if cov is None:
+            return None
+        return covariate_feature_matrix(cov.reindex(columns=self.cov_cols).fillna(0.0))
+
+    def _features(self, lx, cov=None, t=None, cov_matrix=None):
         from ..data.covariates import covariate_features
         base = _lgbm_features(lx)
         if base is None or cov is None:
             return base
+        if cov_matrix is not None:
+            return np.r_[base, cov_matrix[t]]
         if not hasattr(self, "cov_cols"):
             self.cov_cols = list(cov.columns)
         c = cov.reindex(columns=self.cov_cols).fillna(0.0)
         return np.r_[base, covariate_features(c, t)]
 
-    def fit(self, series, covariates=None):
+    def build_rows(self, series, covariates=None):
         if covariates is None:
             raise ValueError("lgbm-cov needs covariates")
-        cols = sorted(set().union(*[set(c.columns) for c in covariates]))
-        self.cov_cols = cols
-        return super().fit(series, [c.reindex(columns=cols).fillna(0.0) for c in covariates])
+        self.cov_cols = sorted(set().union(*[set(c.columns) for c in covariates]))
+        return super().build_rows(series, [c.reindex(columns=self.cov_cols).fillna(0.0) for c in covariates])

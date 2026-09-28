@@ -44,11 +44,14 @@ def window_metrics(actual: np.ndarray, fc: ForecastResult, context: np.ndarray) 
 
 def strategy_stats(ret_pred: np.ndarray, ret_true: np.ndarray, horizon: int, cost_bps: float = 0.0,
                    threshold: float = 0.0, allow_short: bool = False) -> dict:
-    """Trade each (non-overlapping) window: long if predicted return > threshold (short if < -threshold)."""
+    """Trade consecutive non-overlapping windows of one ticker: long if predicted return > threshold (short if
+    < -threshold). Costs are charged only when the position changes (half the round trip per entry or exit), and
+    buy & hold pays a single entry — so staying long across windows is not charged again every window."""
     rp, rt = np.asarray(ret_pred), np.asarray(ret_true)
     pos = np.where(rp > threshold, 1.0, np.where((rp < -threshold) & allow_short, -1.0, 0.0))
     cost = cost_bps / 1e4
-    strat = pos * rt - np.abs(pos) * cost
+    turnover = np.abs(pos - np.r_[0.0, pos[:-1]])
+    strat = pos * rt - turnover * cost / 2
     n = len(strat)
     if n == 0:
         return {}
@@ -64,11 +67,14 @@ def strategy_stats(ret_pred: np.ndarray, ret_true: np.ndarray, horizon: int, cos
                 f"{prefix}max_dd": float(dd.min())}
 
     out = summarize(strat, "strat_")
-    out.update(summarize(rt - cost, "bh_"))  # buy & hold each window (same cost basis)
+    bh = rt.astype(float).copy()
+    bh[0] -= cost / 2                          # buy once, hold
+    out.update(summarize(bh, "bh_"))
     traded = pos != 0
     out["hit_rate"] = float(np.mean(np.sign(pos[traded]) == np.sign(rt[traded]))) if traded.any() else np.nan
     out["exposure"] = float(traded.mean())
-    out["n_trades"] = int(traded.sum())
+    out["n_trades"] = int((turnover > 0).sum())
+    out["turnover"] = float(turnover.mean())
     return out
 
 

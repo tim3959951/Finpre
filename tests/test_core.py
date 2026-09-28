@@ -104,7 +104,11 @@ def test_window_metrics_naive_direction_undefined():
 
 def test_strategy_stats_costs():
     s = strategy_stats(np.array([0.01, 0.01]), np.array([0.02, -0.01]), 5, cost_bps=50)
-    assert s["n_trades"] == 2 and s["strat_total_ret"] == pytest.approx((1.015) * (0.985) - 1)
+    # entered once (half the round trip), then stayed long: no second charge
+    assert s["n_trades"] == 1 and s["strat_total_ret"] == pytest.approx((1.0175) * (0.99) - 1)
+    s = strategy_stats(np.array([0.01, -0.01, 0.01]), np.array([0.02, 0.01, -0.01]), 5, cost_bps=50)
+    assert s["n_trades"] == 3 and s["strat_total_ret"] == pytest.approx(1.0175 * (1 - 0.0025) * (1 - 0.01 - 0.0025) - 1)
+    assert s["bh_total_ret"] == pytest.approx(1.0175 * 1.01 * 0.99 - 1)
 
 
 # ------------------------------------------------------------------ backtest / AB

@@ -1,4 +1,4 @@
-# Fintech Agent 架構設計文件 v0.2
+# Fintech Agent 架構設計文件 v0.3
 
 > 以 Google TimesFM 為核心預測引擎的多代理（multi-agent）AI 投資分析系統。第一階段市場：台灣、美國。
 > 最後更新：2026-09-28
@@ -9,7 +9,7 @@
 
 | 目標 | 設計決策 |
 |---|---|
-| 高準確率預測 | 不押單一模型：TimesFM 2.5 為 v1 champion 與預設退回模型，Chronos-2 / Chronos-Bolt / 統計基準 / 本地訓練模型為 challenger，以 walk-forward 回測 + 統計檢定持續 A/B，勝者才升級（v0.2 起由 LightGBM／LightGBM+籌碼接任各市場 champion，見 §11） |
+| 高準確率預測 | 不押單一模型：TimesFM 2.5 為 v1 champion 與預設退回模型，Chronos-2 / Chronos-Bolt / 統計基準 / 本地訓練模型為 challenger，以 walk-forward 回測 + 統計檢定持續 A/B，勝者才升級（v0.3：2018–2026 回測後，四組市場／天期都由每月重訓的 LightGBM 擔任 champion，見 §11） |
 | 可信、可稽核 | 每個 Agent 都是「**規則引擎先算分（確定性、可重現）→ LLM 解讀並在 ±0.5 內微調**」。LLM 不能捏造數字，也不能無限制推翻量化證據 |
 | 誠實面對市場本質 | 短期股價接近 random walk。量化 Agent 會用「此標的的回測技能」折減自己的訊號；模型打不贏 naive 時，首席顧問自動降低其權重 |
 | 可插拔 | LLM（Anthropic / OpenAI 相容 / Ollama / 無 LLM）、預測模型、資料源皆透過介面抽換 |
@@ -78,6 +78,7 @@ flowchart TB
 - **即時技能檢查**：在該標的上跑 30 個非重疊 walk-forward 視窗（每日快取），得到 MASE、相對 naive 技能、方向準確率與二項檢定 p 值、區間覆蓋率。
 - 分數 = `clip((P(up) − 0.5) × 8)` × **技能折減係數**（打不贏 naive 的模型，訊號會被壓到 0.15–0.3 倍）。
 - 若其他模型在此標的 MASE 明顯較低，建議排入 A/B 測試。
+- **選股排序訊號**（v0.3）：讀取 `scripts/rank_stocks.py` 產生的當日排名，加入「第 k/50 名」訊號；權重上限 ±0.3，依排序模型回測 IC 的 t 值折減，快照超過 7 天則忽略。
 
 ### 3.4 首席投資顧問（`InvestmentAdvisor`）
 - **調度**：完整分析時平行派工；對話模式下透過 tool calling 自主決定呼叫 `analyze_stock / technical_analysis / fundamental_analysis / quant_forecast / compare_models / get_quote / available_models`。
@@ -98,7 +99,7 @@ flowchart TB
 | TiRex | 35M | NXAI 社群授權 | 選配 | challenger |
 | naive / drift / AutoARIMA | – | – | CPU | 基準 |
 | DLinear（全域、分位數） | ~0.1M | 自有 | **MPS GPU 訓練** | 本地訓練 |
-| LightGBM 分位數迴歸 | – | 自有 | CPU，每個模型 5–15 s | **v0.2 champion**（含／不含籌碼共變數） |
+| LightGBM 分位數迴歸 | – | 自有 | CPU，每個模型 5–15 s | **champion（四組）**；共變數版在長期回測中較差 |
 | Ensemble | – | 依成員 | – | 點預測取中位數、分位數平均 |
 
 **實作注意（已處理）**
@@ -108,6 +109,8 @@ flowchart TB
 - macOS 上 torch、LightGBM（Homebrew）與 scikit-learn 各自載入一份 libomp；Agent 在多執行緒中同時用到它們時會互鎖（deadlock）。套件匯入時預設 `OMP_NUM_THREADS=1` 避開（矩陣運算仍走 Accelerate，實測單檔分析 14 秒）；可用環境變數覆寫。
 
 ### 4.1 共變數（籌碼／大盤／匯率）— v0.2
+
+> v0.3 註：2018–2026 長期回測中，共變數讓逐檔時序預測的 LightGBM 變差（§11.2）；籌碼資料目前主要用在選股排序（§11.3）。
 
 `data/covariates.py` 為每檔股票建立與日 K 對齊的共變數面板，**全部是「當日收盤時已知」的 past-only 資料**：
 
@@ -134,14 +137,15 @@ flowchart TB
 
 ### 5.1 Walk-forward 回測（`evaluation/backtest.py`）
 - 由最近往回切 `n_windows` 個預測起點、間隔 `step`；每個預測只看得到起點之前的資料（單元測試驗證無洩漏）。
-- 可訓練模型只用「最早起點之前」的資料訓練一次。
+- 可訓練模型預設只用「最早起點之前」的資料訓練一次；`retrain="M"` 則每月初用當時已知的資料重新訓練（長期回測用）。
 - `--min-origin 2025-10-01`：只評估模型發布後的區間，避免基礎模型的預訓練語料已看過測試期。
 
 ### 5.2 指標（`evaluation/metrics.py`）
 - 點預測：MAE、RMSE、MAPE、sMAPE、**MASE**、**skill vs naive = 1 − MAE/MAE_naive**。
 - 機率預測：WQL（weighted quantile loss）、CRPS、**80% 區間覆蓋率**、區間寬度。
 - 方向與交易：方向準確率（+二項檢定）、IC（預測報酬與實際報酬的 Spearman 相關）、
-  非重疊視窗策略回測（含成本：台股來回 58.5 bps、美股 5 bps）的 Sharpe、最大回撤 vs 同期 buy & hold。
+  非重疊視窗策略回測（台股來回 58.5 bps、美股 5 bps，只在部位改變時收成本）的 Sharpe、最大回撤 vs 同期 buy & hold。
+- 選股排序：每期 rank IC、五分組報酬、前 N 名與多空組合（扣週轉成本）、緩衝換股、依年度／市場狀態／壓力事件拆解（`ranking/backtest.py`）。
 
 ### 5.3 Champion / Challenger A/B（`evaluation/abtest.py`）
 - **離線**：同一組 (ticker, 起點) 配對，對每檔做 Diebold-Mariano（HLN 小樣本修正、Newey-West h−1 lag），以 Stouffer 法合併；另做 moving-block bootstrap 信賴區間與各檔勝率。
@@ -176,12 +180,101 @@ flowchart TB
 | 階段 | 內容 |
 |---|---|
 | v0.1 | 四 Agent、TimesFM 2.5 champion、7+ benchmark 模型、walk-forward、DM A/B、shadow log、Streamlit、可插拔 LLM、M2 本地訓練 DLinear |
-| **v0.2（本版）** | 共變數預測（法人買賣超、融資、大盤、費半、匯率 → Chronos-2 / TimesFM XReg / LightGBM / TimesFM 3.0）；台股 50 + 美股 50 檔 benchmark，含跨股票與產業別分析；結果：本地 LightGBM（含籌碼）接任四個 champion（§11） |
-| v0.3 | LightGBM 每月滾動重訓＋2018–2025 多市場狀態回測；報酬排序目標做台股橫斷面選股；納入下市股票；FinBERT/自訓中文金融情緒模型；TimesFM 2.5 LoRA 微調（MPS） |
+| v0.2 | 共變數預測（法人買賣超、融資、大盤、費半、匯率 → Chronos-2 / TimesFM XReg / LightGBM / TimesFM 3.0）；台股 50 + 美股 50 檔 benchmark，含跨股票與產業別分析；結果見 §12 |
+| **v0.3（本版）** | 2018–2026 多市場狀態回測、LightGBM 每月重訓；台股／美股橫斷面選股排序（逐日選取的股票池）；成本計算修正；全部 benchmark 圖表（§11） |
+| v0.3.x | 低週轉組合建構、上市櫃前 150 大、依市場狀態切換 TimesFM 權重；FinBERT/自訓中文金融情緒模型；TimesFM 2.5 LoRA 微調（MPS） |
 | v0.4 | 排程每日盤後自動分析與 shadow 結算、LINE Bot/網頁推播、使用者帳號與持倉、FastAPI 後端 |
 | v1.0 | 授權資料源、合規流程（KYC 風險屬性問卷、紀錄保存）、雲端部署 |
 
-## 11. v0.2 Benchmark：台股 50 + 美股 50 檔、加入籌碼／大盤／匯率共變數（2026-09-28，M2 Pro 實跑）
+## 11. v0.3 Benchmark：2018 → 2026 多市場狀態、每月重訓、選股排序（2026-09-28，M2 Pro 實跑）
+
+所有圖表（可切換市場／天期、含表格檢視）：`docs/benchmarks/v0.3/*.png`，資料在 `docs/benchmarks/v0.3/chart_data.json`；重現方式見 §11.6。
+
+### 11.1 時序預測：2018-01 → 2026-09，LightGBM 每月重訓
+
+設定：台股 50、美股 50；5 日預測每 5 個交易日一個起點（每市場約 21,000 個視窗），20 日預測每 20 日一個（約 5,300 個）。LightGBM 每月初只用「目標日早於該月」的資料重新訓練（擴張視窗），並且在一個不載入 torch 的獨立程序中以多執行緒訓練。TimesFM 2.5 與 Chronos-2 是零樣本模型，2025-10 以前的期間可能在它們的預訓練資料中，對它們偏樂觀。
+
+| 模型 | 台股 5 日 | 台股 20 日 | 美股 5 日 | 美股 20 日 |
+|---|---|---|---|---|
+| **lgbm**（每月重訓） | **+1.77%**（98% 股票勝出，p<0.0001） | **+3.01%**（88%） | **+0.81%**（96%） | **+0.61%**（74%，p=0.001） |
+| lgbm-cov（＋籌碼／大盤／匯率） | +0.73%（68%） | +1.44%（68%） | −0.21%（50%） | −1.55%（24%） |
+| drift | −0.26% | −1.09% | −0.31% | −2.34% |
+| timesfm-2.5 | −1.02%（24%） | −1.56%（32%） | −2.11%（4%） | −3.26%（12%） |
+| chronos-2 | −1.30%（12%） | −0.52%（40%） | −1.93%（0%） | −1.67%（18%） |
+
+數值是 CRPS 相對 random walk 的改善幅度，括號是 50 檔中勝過 random walk 的比例。
+
+![各年度 CRPS skill](benchmarks/v0.3/02_long_skill_by_year.png)
+
+- **每一年都看**：lgbm 在台股 5 日、台股 20 日、美股 5 日都是 9 年中 8 年為正，唯一例外是 2022 升息空頭；美股 20 日是 6／9 年。TimesFM 2.5 在美股 9 年全部為負。
+- **市場狀態**（大盤在 200 日均線上且 60 日上漲 = 多頭，反之 = 空頭，在預測當下判定）：lgbm 在多頭與空頭都為正（台股 5 日 +1.9% / +2.0%），盤整／轉折期最弱（美股甚至轉負）。TimesFM 2.5 在台股空頭期反而勝過 random walk（5 日 +0.9%、20 日 +2.8%），多頭與盤整期為負。
+- **壓力事件**：2020 COVID 崩盤與 2025-04 關稅衝擊期間，lgbm 在四組都勝過 random walk，TimesFM 在台股兩個天期也勝過（可能因為波動突然放大時，模型的區間比 random walk 的歷史分位數反應更快）；2022 升息空頭所有模型都輸。
+
+![依市場狀態](benchmarks/v0.3/03_long_skill_by_regime.png)
+
+### 11.2 共變數在長期回測中不成立
+
+v0.2 在 12 個月樣本中看到 lgbm-cov 在台股 5 日較好；拉長到 8.7 年後，**lgbm-cov 在四組都輸給不含共變數的 lgbm**（台股 5 日 −1.06%，50 檔全部變差，DM p<0.001）。共變數在個別年份（例如 2026）有幫助，但不穩定，2022 年更讓台股 20 日 skill 掉到 −8.6%。**四個 champion 都改為 `lgbm`**（`settings.yaml` 的 `forecasting.champions`），checkpoint 以 13 年資料重新訓練。
+
+### 11.3 選股排序（`fintech_agent/ranking/`、`scripts/rank_stocks.py`）
+
+把預測目標從「單檔價格」改成「同一天所有股票的相對排名」：特徵在每個日期轉成橫斷面百分位（價量、波動、Beta、三大法人 5/20/60 日買超、融資水位），標籤是未來 5 或 20 日報酬的橫斷面排名，LightGBM 每月重訓。每 5 或 20 日排序一次，**收盤後產生訊號、隔日收盤才進場**，前 10 名等權持有，換手部分扣來回成本（台股 58.5 bps）。「緩衝換股」只在持股跌出前 20 名時才賣。
+
+**股票池是這次最重要的修正**：每天依過去 60 日平均成交值，從目前所有上市普通股中選出前 50 大（2018 起共 295 檔曾入選），而不是用今天的台灣 50 成分股往回測。
+
+| 方法（上市流動性前 50，每週換股） | 平均 IC | IC t 值 | 前 10 名超額（未扣成本，緩衝） | 扣 58.5 bps | 扣約 40 bps |
+|---|---|---|---|---|---|
+| **LightGBM 排序＋籌碼** | **+0.030** | **3.4** | +9.1% | −0.5% | +2.6% |
+| LightGBM 排序（價量） | +0.028 | 2.9 | +6.0% | −3.7% | −0.6% |
+| 外資 20 日買超 | +0.010 | 1.3 | +5.1% | −0.9% | +1.0% |
+| 動能 6-1 月 | −0.018 | −1.5 | +7.7% | +5.4% | +6.1% |
+
+超額 = 前 10 名組合相對「等權持有全部 50 檔」的年化差距。
+
+![選股排序淨值](benchmarks/v0.3/05_ranking_equity.png)
+
+- **訊號是真的**：LightGBM＋籌碼的每週 IC 為 0.030（t=3.4），9 年中 8 年為正，依分數分五組的年化報酬大致單調（Q1 25% → Q5 38%）。籌碼特徵讓 IC 略升（0.028 → 0.030），前 10 名淨超額改善約 3 個百分點，但各年度並不一致。
+- **但成本吃掉大部分**：每週換股即使加上緩衝，週轉仍約 33%，58.5 bps 的牌價成本每年約 9.6%，剛好把 9.1% 的毛超額吃光。手續費打約 2.8 折（證交稅 30 bps 不能折，來回約 38–40 bps）時剩約 +2.6%／年。每月換股的 IC 只有 0.030（t=1.6），不顯著。
+- **v0.2 的「IC 0.11」要重新理解**：那是 12 個月、把所有股票與日期混在一起算的相關係數，包含了大盤漲跌帶來的共同變動；真正的選股能力要看「同一天內」的排序相關，也就是這裡的 0.03。
+- **美股**：IC 約 0.01，沒有顯著訊號。
+
+![股票池偏差](benchmarks/v0.3/09_ranking_survivorship.png)
+
+**存活者偏差的實測**：同一套方法用「現行台灣 50」回測時，動能因子月 IC +0.077、前 10 名每年超額 +18%，看起來是最好的策略；換成逐日選取的股票池後，動能 IC 變成 −0.035。今天的權值股大多是過去幾年漲最多的股票，用它們回測會系統性地高估追漲策略。v0.2 以前所有「策略報酬」都有這個問題；CRPS 這類「模型 vs random walk、同一批股票」的相對比較受影響較小。
+
+![交易成本敏感度](benchmarks/v0.3/10_ranking_cost_sensitivity.png)
+
+### 11.4 擇時策略與成本計算修正
+
+`evaluation/metrics.py` 的策略回測改為**只在部位改變時收成本**（每次進出各付一半來回成本），買進持有只付一次進場成本。v0.2 每個視窗都重收一次成本，對策略與買進持有都過度扣費，§12.3 的表因此偏低。用新算法，2018–2026「預測上漲才持有」的 Sharpe：台股 5 日 lgbm 0.61 vs 買進持有 0.79、美股 5 日 0.68 vs 0.67。**模型的價值在機率預測與風險區間，不在擇時**；決策引擎也是這樣使用它們（部位大小、停損、信心），而不是依預測方向進出。
+
+### 11.5 系統變更
+
+- `BacktestConfig(retrain="M")`：可訓練模型每月重訓；`LGBMForecaster.build_rows / fit_rows` 讓訓練特徵只算一次。
+- `fintech_agent/ranking/`：橫斷面特徵面板、LightGBM 排序器、因子基準、排序回測（IC、分組報酬、前 N 名與多空組合、週轉與成本、緩衝換股）。
+- `data/universe.py`：`point_in_time_members` 逐日選股、`bulk_prices` 批次下載（不消耗 FinMind 額度）。
+- 量化 Agent 讀取 `runs/ranking_{市場}_h{天數}.json`，在分析中加入「選股排序：第 k/50 名」訊號，權重上限 ±0.3，並依回測 IC 的 t 值折減（t < 3 時等比例降低）。Streamlit「模型實驗室」可查看最新排名。
+- `evaluation/regimes.py`：市場狀態與壓力事件標記；benchmark 報告新增各年度／市場狀態／事件的 skill。
+- 修正：FinMind 2014 年以前的自營商欄位名稱（`Dealer`）、`regime_at` 在多檔股票同一天時的重複索引錯誤、benchmark 先存 CSV 再做報表。
+
+### 11.6 限制與下一步
+
+- 已下市或被合併的股票（例如 2025 年併入台新的新光金）不在 yfinance 資料中，逐日股票池仍有少量存活者偏差。
+- 單一回測期間（2018–2026，台股長期多頭）；多重比較：時序預測主要結論的 p 值都 < 0.001，選股排序的 t=3.4 在 7 種方法 × 2 個天期的比較下仍顯著，但邊際不大。
+- **下一步**：(a) 降低週轉的組合建構（分數平滑、換股門檻隨成本調整、每兩週換股）；(b) 擴大到上市櫃前 150 大以提高排序的統計檢定力；(c) 把 TimesFM 在空頭期的優勢做成市場狀態切換（空頭時提高 TimesFM 權重）；(d) 每週排程重跑排序與 benchmark、shadow 結算。
+
+重現：
+
+```bash
+FA_LGBM_JOBS=4 OMP_NUM_THREADS=4 python scripts/benchmark.py --universe tw50 --horizon 5 --models naive drift lgbm lgbm-cov \
+  --years 13 --min-origin 2018-01-01 --windows 100000 --retrain M --out logs/lh_tw50_h5_ml.csv
+OMP_NUM_THREADS=3 python scripts/benchmark.py --universe tw50 --horizon 5 --models naive timesfm-2.5 chronos-2 \
+  --years 13 --min-origin 2018-01-01 --windows 100000 --out logs/lh_tw50_h5_fm.csv
+python scripts/rank_stocks.py --pool twse --pit-top 50 --horizon 5 --backtest --start 2018-01-01 --out logs/rank_twpit_h5
+python scripts/export_benchmark_charts.py && python scripts/plot_benchmarks.py
+```
+
+## 12. v0.2 Benchmark：台股 50 + 美股 50 檔、加入籌碼／大盤／匯率共變數（2026-09-28，M2 Pro 實跑）
 
 **設定**
 - 股票池：台股市值前 50 大（`tw50`）、美股大型股 50 檔（`us50`），清單見 `fintech_agent/data/universe.py`。
@@ -191,7 +284,7 @@ flowchart TB
 - 交易成本：台股來回 58.5 bps（手續費 0.1425%×2 + 證交稅 0.3%），美股 5 bps。
 - 指標：CRPS skill = 相對 random walk 的機率預測改善幅度（正值才有預測力）；「勝過 naive 比例」= 50 檔中 CRPS 優於 random walk 的股票比例，並以 sign test 檢定。
 
-### 11.1 CRPS skill vs random walk（越高越好）
+### 12.1 CRPS skill vs random walk（越高越好）
 
 | 模型 | 台股 5 日 | 台股 20 日 | 美股 5 日 | 美股 20 日 |
 |---|---|---|---|---|
@@ -210,7 +303,7 @@ flowchart TB
 
 括號內為 50 檔中勝過 random walk 的比例；未標 p 值者 sign test 不顯著（p > 0.05）。含個股中位數 skill、80% 區間覆蓋、方向準確率、IC 的完整表格見 `docs/benchmarks/v0.2/summary.md`。
 
-### 11.2 共變數 A/B（同一模型加／不加共變數，CRPS、DM + Stouffer）
+### 12.2 共變數 A/B（同一模型加／不加共變數，CRPS、DM + Stouffer）
 
 | 比較 | 台股 5 日 | 台股 20 日 | 美股 5 日 | 美股 20 日 |
 |---|---|---|---|---|
@@ -220,7 +313,7 @@ flowchart TB
 | timesfm-2.5-xreg vs timesfm-2.5 | **−2.63%（變差）** | **−2.41%（變差）** | **−3.12%（變差）** | **−1.93%（變差）** |
 | timesfm-3.0-cov vs timesfm-3.0 | −0.88% | **−2.05%（變差）** | **−0.57%（變差）** | −1.39% |
 
-### 11.3 扣成本後策略 Sharpe（預測上漲才持有）vs buy & hold
+### 12.3 扣成本後策略 Sharpe（預測上漲才持有）vs buy & hold
 
 | | 台股 5 日 | 台股 20 日 | 美股 5 日 | 美股 20 日 |
 |---|---|---|---|---|
@@ -232,15 +325,17 @@ flowchart TB
 
 只有「台股 5 日 lgbm-cov」在扣掉 58.5 bps 來回成本後勝過 buy & hold（方向準確率 53.5%、IC +0.112）。
 
-### 11.4 解讀
+> v0.3 註：這張表每個視窗都重收一次來回成本，對策略與 buy & hold 都過度扣費；成本計算已修正（§11.4），新數字見圖表頁與 `docs/benchmarks/v0.3/chart_data.json`。
+
+### 12.4 解讀
 
 1. **台股比美股有更多可預測結構**。同一套方法，台股兩個天期的最佳模型都有 +3–4% 的 CRPS 改善、80% 的股票勝過 random walk，而且統計顯著；美股最佳只有 +0.5–0.8%，不顯著。合理的解釋（假說，未證實）：美股大型股流動性與套利更充分、價格更接近效率市場；台股散戶比重高、法人買賣超有延續性、漲跌幅限制造成短期動能／反轉，這些結構本地訓練的模型學得到。
 2. **TimesFM 並不是「美股比較好、台股比較差」，而是反過來**：TimesFM 2.5 在台股 5 日只輸 random walk 0.26%，在美股輸 2.33%（20 日：−1.6% vs −4.0%）；v0.1 的 6 檔結果方向一致（−1.0% vs −2.4%）。它的強項仍是區間：80% 區間實際覆蓋台股 79%、美股 83%，是所有模型中最接近 80% 的，適合拿來算停損與部位大小。
 3. **本地訓練的 LightGBM 勝過所有 zero-shot 基礎模型**，而且 50 檔中多數股票都勝出（不是少數股票撐起平均）。原因：它學的是「這個市場」的橫斷面規律（所有股票一起訓練），基礎模型只看單一價格序列。
 4. **共變數只對「會學習」的模型有用**。籌碼／大盤／匯率加到 LightGBM，台股 5 日 IC 從 0.01 提升到 0.11（選股排序能力明顯變好），產業上以半導體（+3.9%）、塑膠（+3.8%）、電腦週邊（+3.6%）最明顯；但加到 Chronos-2 或 TimesFM XReg（zero-shot，靠 in-context 迴歸）一律變差——短期個股報酬的訊雜比太低，模型在單一序列內擬合共變數會過度擬合雜訊。共變數版集成（TimesFM 2.5 + Chronos-2-cov + lgbm-cov）相較原集成（TimesFM 2.5 + Chronos-2 + Bolt）在台股 5 日與美股 20 日顯著變好，貢獻主要來自 lgbm-cov 成員。
-5. **Champion 更新**（相對 TimesFM 2.5 的 A/B：DM p < 0.001）：台股 5 日 → `lgbm-cov`（+3.65%，82% 股票勝出）、台股 20 日 → `lgbm`（+5.12%，78%）、美股 5 日 → `lgbm`（+2.75%，80%）、美股 20 日 → `lgbm-cov`（+4.59%，62%）。已寫入 `settings.yaml` 的 `forecasting.champions`；TimesFM 2.5 保留為預設與退回模型。注意美股的 champion 只是「比 TimesFM 好」，相對 random walk 並無顯著優勢，量化 Agent 的技能折減係數會自動壓低它的方向訊號。
+5. **Champion 更新**（v0.3 已依 2018–2026 回測改為四組都用 `lgbm`，見 §11.2）（相對 TimesFM 2.5 的 A/B：DM p < 0.001）：台股 5 日 → `lgbm-cov`（+3.65%，82% 股票勝出）、台股 20 日 → `lgbm`（+5.12%，78%）、美股 5 日 → `lgbm`（+2.75%，80%）、美股 20 日 → `lgbm-cov`（+4.59%，62%）。已寫入 `settings.yaml` 的 `forecasting.champions`；TimesFM 2.5 保留為預設與退回模型。注意美股的 champion 只是「比 TimesFM 好」，相對 random walk 並無顯著優勢，量化 Agent 的技能折減係數會自動壓低它的方向訊號。
 
-### 11.5 限制與下一步
+### 12.5 限制與下一步
 
 - **存活者偏差**：股票池是現在的成分股，回測期間內曾被剔除的股票不在內，會高估 buy & hold 與策略報酬；CRPS 的相對比較（模型 vs random walk 同一批股票）受影響較小。
 - **單一市場狀態**：約 12 個月、台股大多頭（20 日方向準確率 55–60% 很大一部分來自「一直猜漲」，drift 也有 60%，而 20 日 IC 為負），需在空頭與盤整期驗證。
@@ -249,12 +344,12 @@ flowchart TB
 
 重現：`scripts/benchmark.py --universe tw50|us50 --horizon 5|20 --min-origin 2025-10-01 --out logs/...csv`，再用 `scripts/summarize_benchmarks.py` 彙整；原始報告在 `docs/benchmarks/v0.2/`。
 
-## 12. 附錄：v0.1 首輪 Benchmark（2026-09-26，每市場 6 檔）
+## 13. 附錄：v0.1 首輪 Benchmark（2026-09-26，每市場 6 檔）
 
 **設定**：只評估模型發布後的區間（預測起點 ≥ 2025-10-01，避免預訓練資料洩漏）；台股 2330 / 2317 / 2454 / 2881 / 2412 / 0050，美股 AAPL / MSFT / NVDA / JPM / XOM / SPY；5 日預測每 5 日一個視窗（每市場約 290 個視窗）、20 日預測每 20 日一個視窗（約 71 個）。可訓練模型只用 2025-10 之前資料訓練。
 **排序指標**：CRPS（以價格百分比表示，跨標的可比）；`crps_skill` = 相對 random walk 的改善幅度，正值才代表有預測力。
 
-### 12.1 5 日預測 — CRPS skill vs random walk（越高越好）
+### 13.1 5 日預測 — CRPS skill vs random walk（越高越好）
 
 | 模型 | 台股 | 美股 | 台股 80% 區間覆蓋 | 美股 80% 區間覆蓋 | 台股方向準確率 | 美股方向準確率 |
 |---|---|---|---|---|---|---|
@@ -268,7 +363,7 @@ flowchart TB
 | chronos-bolt-small | −3.9% | −2.9% | 78% | 79% | 52% | 54% |
 | dlinear（校準後） | −12.4% | −14.0% | 86% | 79% | 53% | 46% |
 
-### 12.2 20 日預測 — CRPS skill vs random walk
+### 13.2 20 日預測 — CRPS skill vs random walk
 
 | 模型 | 台股 | 美股 |
 |---|---|---|
@@ -279,7 +374,7 @@ flowchart TB
 | chronos-2 | −7.4% | +1.3% |
 | timesfm-2.5 | −1.2% | −2.4% |
 
-### 12.3 當時的解讀
+### 13.3 當時的解讀
 1. **沒有任何模型在統計上穩定打敗 random walk**：基礎模型與統計模型的 CRPS 大多落在 random walk ±4% 以內，方向準確率 41–63%、IC ≈ 0。扣除交易成本後，多數「預測上漲才持有」策略的 Sharpe 低於同期 buy & hold；少數例外（LightGBM：台股 5 日 0.89 vs 0.69、美股 20 日 1.07 vs 1.06）樣本太小、未達顯著，值得在更大的股票池上驗證。整體與學術文獻一致：只看日頻價格序列的 zero-shot 基礎模型沒有可靠的方向 alpha。
 2. **TimesFM 2.5 的價值在「區間」而非「方向」**：台股 80% 區間實際覆蓋 81%（最接近理想值），很適合拿來算停損、部位大小與風險預算——這正是目前決策引擎的用法。
 3. A/B 檢定（CRPS、DM + Stouffer，α=0.05）：美股 5 日 **TimesFM 3.0 顯著優於 2.5**（p=0.006，6/6 檔勝出），ensemble 也顯著優於 2.5（p=0.007）；但兩者都只比 random walk 好 0–0.4%，且 3.0 為非商用授權 → **維持 TimesFM 2.5 為 champion**，量化 Agent 的技能折減係數會自動把它的方向訊號壓低。
@@ -288,4 +383,4 @@ flowchart TB
 
 **下一步最值得做的三件事**：(a) 加入籌碼/大盤/匯率共變數（Chronos-2、TimesFM XReg）；(b) 預測目標改為報酬率與波動率，並做橫斷面排序選股；(c) 擴大回測股票池，每週排程自動跑 benchmark 與 shadow 結算。
 
-原始報告：`docs/benchmarks/benchmark_{TW,US}_h{5,20}.json`。v0.2 已依第 (a)、(c) 點擴充，結果見 §11。
+原始報告：`docs/benchmarks/benchmark_{TW,US}_h{5,20}.json`。v0.2 已依第 (a)、(c) 點擴充，結果見 §12；v0.3 的長期回測與選股排序見 §11。

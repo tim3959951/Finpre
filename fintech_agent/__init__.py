@@ -8,4 +8,4 @@ if _sys.platform == "darwin":
     # multiplies still use Accelerate). Must run before torch / lightgbm are imported; override via env.
     _os.environ.setdefault("OMP_NUM_THREADS", "1")
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

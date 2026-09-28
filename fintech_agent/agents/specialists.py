@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 
 import numpy as np
+import pandas as pd
 
 from ..data.cache import DiskCache
 from ..evaluation.abtest import direction_significance
@@ -207,4 +208,45 @@ class QuantAgent(BaseAgent):
             gap = (sk["mase"] - skill[best]["mase"]) / sk["mase"]
             if gap > 0.03:
                 signals.append((f"{best} 在此標的 MASE 低於 champion {gap:.1%}，建議排入 A/B 測試", 0.0))
+        rank = self._ranking(ctx)
+        if rank:
+            ev["cross_sectional_rank"] = rank
+            score += rank["contribution"]
+            signals.append((f"選股排序模型 {rank['model']}（{rank['universe']}，{rank['horizon']} 日）：第 {rank['rank']}/{rank['n']} 名"
+                            f"（前 {rank['top_pct']:.0%}）；歷史回測 IC {rank['ic_mean']:+.3f}（t={rank['ic_t']:.1f}），"
+                            f"前 {rank['top_n']} 名組合扣成本年化超額 {rank['excess_ann']:+.1%}", rank["contribution"]))
         return ev, float(np.clip(score, -2, 2)), conf, signals, {"forecasts": results}
+
+    def _ranking(self, ctx: AnalysisContext) -> dict | None:
+        """Today's cross-sectional rank from `scripts/rank_stocks.py` (runs/ranking_{market}_h{h}.json), if fresh."""
+        import json
+        runs = self.settings.resolve_path("evaluation.runs_dir")
+        for h in (ctx.horizon, 5, 20):
+            p = runs / f"ranking_{ctx.symbol.market}_h{h}.json"
+            if p.exists():
+                break
+        else:
+            return None
+        try:
+            snap = json.loads(p.read_text())
+        except Exception as e:  # pragma: no cover - corrupt file
+            log.warning("ranking snapshot unreadable: %s", e)
+            return None
+        as_of = pd.Timestamp(snap.get("as_of"))
+        max_age = int(self.settings.get_path("ranking.max_age_days", 7))
+        if (ctx.prices.index[-1] - as_of).days > max_age:
+            return None
+        row = next((r for r in snap.get("ranks", []) if str(r["ticker"]) == ctx.symbol.code), None)
+        if row is None:
+            return None
+        bt = snap.get("backtest") or {}
+        ic_t = float(bt.get("ic_t") or 0.0)
+        weight = float(self.settings.get_path("ranking.weight", 0.5))
+        gate = float(np.clip(ic_t / 3, 0, 1))                    # no evidence of skill -> no weight
+        n = int(snap.get("n") or len(snap["ranks"]))
+        pos = (row["rank"] - 1) / max(1, n - 1)                  # 0 = best, 1 = worst
+        return {"model": snap.get("model"), "universe": snap.get("universe"), "horizon": snap.get("horizon"),
+                "as_of": str(as_of.date()), "rank": int(row["rank"]), "n": n, "top_pct": row["rank"] / n,
+                "ic_mean": float(bt.get("ic_mean") or 0.0), "ic_t": ic_t, "top_n": int(bt.get("top_n") or 10),
+                "excess_ann": float(bt.get("buf_excess_ann") or bt.get("excess_ann") or 0.0),
+                "contribution": round(float((0.5 - pos) * 2 * weight * gate), 3)}

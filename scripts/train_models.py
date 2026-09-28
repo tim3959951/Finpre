@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Train the locally-trained models on a ticker universe and save checkpoints for the live quant agent.
 
-  python scripts/train_models.py --universe tw50 --models lgbm lgbm-cov --horizons 5 20
+  python scripts/train_models.py --universe tw50 --models lgbm --horizons 5 20 --years 13
   python scripts/train_models.py --universe us50 --models lgbm lgbm-cov dlinear --horizons 5 20
 
 Checkpoints: checkpoints/{model}_{market}_h{H}.pkl (LightGBM) / .pt (DLinear, trained on MPS).
@@ -30,10 +30,13 @@ def main() -> None:
     ap.add_argument("--models", nargs="*", default=["lgbm", "lgbm-cov"])
     ap.add_argument("--horizons", nargs="*", type=int, default=[5, 20])
     ap.add_argument("--epochs", type=int, default=20, help="DLinear epochs")
+    ap.add_argument("--years", type=float, default=None, help="history to train on (default data.history_years)")
     args = ap.parse_args()
     s = get_settings()
     prov = LiveDataProvider(s)
     prov.fm.max_wait_s = 3600
+    if args.years:
+        prov.years = args.years
     market, tickers = UNIVERSES[args.universe]
     need_cov = any(SPECS[m].covariates for m in args.models if m in SPECS)
     series, covs = [], []
