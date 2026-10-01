@@ -153,7 +153,8 @@ def scorecard_lines(rep: dict) -> list[str]:
                     txt += f"、誤差相對 random walk {best['mae_vs_naive_pct']:+.1f}%"
             out.append(txt + "。")
         elif lv.get("pending"):
-            out.append(f"上線追蹤（{lv.get('since')} 起）：{lv['pending']} 筆預測等待到期，到期後每天自動計分並公開。")
+            since = f"（{lv['since']} 起）" if lv.get("since") else ""
+            out.append(f"上線追蹤{since}：{lv['pending']} 筆預測等待到期，到期後每天自動計分並公開。")
     return out
 
 

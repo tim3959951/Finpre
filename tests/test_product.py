@@ -211,3 +211,11 @@ def test_quoted_headlines_pass_through_labelled():
     assert clean["evidence"]["headlines"][0]["title"].startswith("外資調升目標價")   # quotation kept verbatim
     assert clean["summary"] == "新聞偏多。"                                          # own words still scrubbed
     assert g.check(clean) == [] and "quote_note" in rep.public() and "removed_text" not in rep.public()
+
+
+def test_live_scorecard_reports_start_date_before_anything_matures():
+    from fintech_agent.data import SyntheticProvider
+    from fintech_agent.product.scorecard import live_scorecard, track_universe
+    track_universe(SyntheticProvider(), ["2330"], (5,))
+    card = live_scorecard()
+    assert card["resolved"] == 0 and card["pending"] >= 1 and card["since"]

@@ -264,3 +264,22 @@ def test_incremental_history_fetches_only_new_days(tmp_path):
     calls.clear()
     h.get("inst_hist", "2330", "2025-01-01", "2025-04-30", fetch, keys=("date", "name"))
     assert calls == []                                              # nothing new: no network
+
+
+def test_incremental_history_remembers_empty_refresh(tmp_path):
+    from fintech_agent.data.history import IncrementalHistory
+    calls = []
+
+    def fetch(a, b):
+        calls.append((a, b))
+        d = pd.bdate_range(a, min(pd.Timestamp(b), pd.Timestamp("2025-04-29")))   # source has nothing after 04-29
+        return pd.DataFrame({"date": d.strftime("%Y-%m-%d"), "v": 1.0})
+
+    h = IncrementalHistory(tmp_path / "hist")
+    h.get("margin_hist", "2330", "2025-01-01", "2025-04-29", fetch)
+    calls.clear()
+    h.get("margin_hist", "2330", "2025-01-01", "2025-04-30", fetch)      # today's row not published yet
+    h.get("margin_hist", "2330", "2025-01-01", "2025-04-30", fetch)      # asked again the same day
+    assert len(calls) == 1
+    h.get("margin_hist", "2330", "2025-01-01", "2025-05-01", fetch)      # a new day: ask again
+    assert len(calls) == 2

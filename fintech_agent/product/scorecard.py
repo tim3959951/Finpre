@@ -65,9 +65,10 @@ def live_scorecard(settings: Settings | None = None, min_n: int = 1) -> dict:
     if df.empty:
         return {"pending": 0, "resolved": 0, "models": []}
     pending = int(df["resolved_at"].isna().sum())
+    since = str(pd.to_datetime(df["origin_date"]).min().date())
     r = df[df["resolved_at"].notna()].copy()
     if r.empty:
-        return {"pending": pending, "resolved": 0, "models": []}
+        return {"since": since, "pending": pending, "resolved": 0, "models": []}
     r["up"] = (r["actual_h"] > r["last_price"]).astype(float)
     r["abs_err"] = (r["point_h"] - r["actual_h"]).abs() / r["last_price"]
     r["in80"] = ((r["actual_h"] >= r["q10_h"]) & (r["actual_h"] <= r["q90_h"])).astype(float)
@@ -88,7 +89,6 @@ def live_scorecard(settings: Settings | None = None, min_n: int = 1) -> dict:
                 row["mae_vs_naive_pct"] = round(float((1 - j["m"].mean() / j["n"].mean()) * 100), 2)
                 row["paired_n"] = int(len(j))
         rows.append(row)
-    since = str(pd.to_datetime(df["origin_date"]).min().date())
     return {"since": since, "pending": pending, "resolved": int(len(r)), "models": sorted(rows, key=lambda x: -x["n"])}
 
 

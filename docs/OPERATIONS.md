@@ -69,6 +69,8 @@ python scripts/manage_tenants.py deactivate t_xxxx                              
 
 手動重跑：`python scripts/daily_job.py --market TW --force`（`--skip-ranking` 可省下約 10 分鐘）。
 
+資料源額度：台股排名用到約 300 檔歷史成分股的籌碼。每日更新只重新抓「目前在股票池內」的 50 檔，其他股票沿用 45 天內的已存資料（`rank_stocks.py --stale-nonmembers`），一天約 150 次 FinMind 呼叫。排名步驟超過 90 分鐘（`product.daily.TW.ranking_timeout_s`）會中止並沿用前一份排名，退出碼 3。第一次部署時建議先在非交易時段跑一次完整排名，把歷史籌碼存進快取。
+
 ## 5. 監控
 
 | 檢查 | 方式 | 警戒 |

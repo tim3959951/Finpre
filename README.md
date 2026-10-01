@@ -23,7 +23,7 @@ uv venv --python python3.11 .venv && source .venv/bin/activate
 uv pip install -e ".[models,llm,api,dev]"
 cp .env.example .env        # 填入 ANTHROPIC_API_KEY / OPENAI_API_KEY / FINMIND_TOKEN（皆為選填）
 
-pytest -q                                   # 116 個測試（離線、合成資料）
+pytest -q                                   # 118 個測試（離線、合成資料）
 python scripts/compliance_check.py          # 合規自我測試（對抗式 LLM）
 python scripts/analyze.py 2330 --provider none          # 規則模式，不需任何 LLM（研究模式）
 python scripts/analyze.py NVDA --provider anthropic     # Anthropic API 當大腦

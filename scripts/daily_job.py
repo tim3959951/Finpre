@@ -73,6 +73,11 @@ def main() -> None:
         print(f"no {args.market} bar for {today} (last {last_bar}): market holiday or data not yet published — skipping"
               " (use --force to run anyway)")
         return
+    close_at = {"TW": (14, 0), "US": (16, 30)}[args.market]          # close + time for the data to settle
+    now = pd.Timestamp.now(tz=tz)
+    if last_bar == today and (now.hour, now.minute) < close_at and not args.force:
+        print(f"{args.market} session still open ({now:%H:%M} {tz}): today's bar is intraday — skipping (use --force)")
+        return
 
     if not args.skip_ranking:
         t0 = step("ranking snapshot")
@@ -80,11 +85,15 @@ def main() -> None:
                "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS", "4")}
         for h in (5, 20):
             cmd = [sys.executable, str(ROOT / "scripts" / "rank_stocks.py"), *cfg.get("ranking", []), "--horizon", str(h)]
-            r = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
-            ok = r.returncode == 0
+            try:
+                r = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True,
+                                   timeout=int(cfg.get("ranking_timeout_s", 5400)))
+                ok, err = r.returncode == 0, r.stderr[-2000:]
+            except subprocess.TimeoutExpired:
+                ok, err = False, "timed out (data source rate limit?) — the previous ranking snapshot stays in use"
             print(f"  h={h}: {'ok' if ok else 'FAILED'} ({time.time() - t0:.0f}s)")
             if not ok:
-                print(r.stderr[-2000:])
+                print(err)
                 failed.append(f"ranking_h{h}")
             summary[f"ranking_h{h}"] = ok
 

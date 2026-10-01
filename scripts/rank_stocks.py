@@ -78,6 +78,9 @@ def main() -> None:
     ap.add_argument("--tag", default="", help="suffix for the backtest report file (experiments)")
     ap.add_argument("--cached-chips", type=int, default=0,
                     help="reuse stored 籌碼 history up to N days old instead of refreshing (backtests)")
+    ap.add_argument("--stale-nonmembers", type=int, default=45,
+                    help="daily snapshot: stocks no longer in the point-in-time universe only feed training rows, so "
+                         "their 籌碼 history may be this many days old (saves ~3 FinMind calls per stock per day)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING)
 
@@ -101,7 +104,11 @@ def main() -> None:
         prices = {t: allpx[t] for t in ever}
         names = {t: str(info.get(t, t)) for t in ever}
         covs = {}
+        latest = members.iloc[-1].fillna(False).astype(bool) if len(members) else None
+        current = set(latest[latest].index) if latest is not None else set(ever)
         for k, t in enumerate(ever):
+            fresh = args.backtest or t in current
+            prov.chips_stale_ok_days = args.cached_chips if fresh else max(args.cached_chips, args.stale_nonmembers)
             c = prov.covariates(prov.symbol(t), prices[t])
             if len(c):
                 covs[t] = c
