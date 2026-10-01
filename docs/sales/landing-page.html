@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Finpre</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a graded report card. Ledger paper, ink, and the teacher's red pen — which in Taiwan is also the colour of "up". */
+:root {
+  --paper: #f1f4f2;
+  --panel: #ffffff;
+  --ink: #15202d;
+  --muted: #5a6573;
+  --rule: #d3dad5;
+  --grid: #e3e8e4;
+  --red: #c22d2d;      /* better / up (台股紅漲) */
+  --green: #1d7a51;    /* worse / down (台股綠跌) */
+  --focus: #2c5fd6;
+  --display: "LXGW WenKai TC", "Kaiti TC", "BiauKai", "STKaiti", serif;
+  --body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0f151c; --panel: #161f29; --ink: #e6ebe8; --muted: #9aa6b2; --rule: #2a3542; --grid: #1f2934;
+    --red: #ff6b66; --green: #43c08a; --focus: #7aa2ff; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0f151c; --panel: #161f29; --ink: #e6ebe8; --muted: #9aa6b2; --rule: #2a3542; --grid: #1f2934;
+  --red: #ff6b66; --green: #43c08a; --focus: #7aa2ff; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.75 var(--body);
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px);
+  background-size: 100% 32px;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 700; text-wrap: balance; line-height: 1.25; margin: 0; }
+h2 { font-size: clamp(1.6rem, 3.4vw, 2.3rem); }
+h3 { font-size: 1.25rem; }
+p { margin: 0; }
+.eyebrow { font: 500 0.78rem/1.4 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.up { color: var(--red); } .down { color: var(--green); }
+
+/* nav */
+header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: color-mix(in srgb, var(--paper) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--rule); }
+.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 12px; flex-wrap: wrap; }
+.brand { font: 700 1.35rem/1 var(--display); text-decoration: none; display: flex; align-items: baseline; gap: 10px; }
+.brand small { font: 400 0.75rem/1 var(--mono); color: var(--muted); }
+nav.links { display: flex; gap: 18px; flex-wrap: wrap; font-size: 0.92rem; }
+nav.links a { text-decoration: none; color: var(--muted); }
+nav.links a:hover { color: var(--ink); }
+
+/* hero */
+.hero { padding-block: 56px 40px; display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 48px; align-items: start; }
+.hero h1 { font-size: clamp(2.4rem, 6vw, 4.1rem); margin-top: 14px; }
+.hero h1 .pen { color: var(--red); position: relative; white-space: nowrap; }
+.hero h1 .pen::after { content: ""; position: absolute; left: -4%; right: -4%; bottom: 0.02em; height: 0.16em; background: var(--red); opacity: 0.28; border-radius: 40% 60% 50% 50%; transform: rotate(-1.2deg); }
+.lede { margin-top: 20px; font-size: 1.08rem; color: var(--muted); max-width: 34em; }
+.cta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
+.btn { display: inline-block; padding: 11px 20px; border-radius: 6px; font-weight: 500; text-decoration: none; border: 1.5px solid var(--ink); }
+.btn.primary { background: var(--ink); color: var(--paper); }
+.btn:hover { transform: translateY(-1px); }
+.facts { margin-top: 30px; display: flex; gap: 28px; flex-wrap: wrap; }
+.facts div { display: grid; gap: 2px; }
+.facts b { font: 500 1.5rem/1.1 var(--mono); }
+.facts span { font-size: 0.82rem; color: var(--muted); }
+
+/* report card */
+.card { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 22px 22px 18px; box-shadow: 0 1px 0 var(--rule), 0 18px 40px -28px rgba(20, 30, 45, 0.45); min-width: 0; }
+.card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; border-bottom: 2px solid var(--ink); padding-bottom: 10px; }
+.card-head h3 { font-size: 1.35rem; }
+.scroll { overflow-x: auto; }
+table.grade { border-collapse: separate; border-spacing: 3px; width: 100%; margin-top: 12px; font-size: 0.86rem; }
+.grade th { font: 400 0.75rem/1.2 var(--mono); color: var(--muted); padding: 4px 2px; text-align: center; white-space: nowrap; }
+.grade th.row { text-align: left; font: 500 0.84rem/1.2 var(--body); color: var(--ink); padding-right: 6px; white-space: nowrap; }
+.grade td { text-align: center; padding: 9px 1px; border-radius: 4px; font: 500 0.78rem/1 var(--mono); font-variant-numeric: tabular-nums; min-width: 36px; }
+.grade td.pos { background: color-mix(in oklab, var(--red) var(--k), var(--panel)); color: var(--ink); }
+.grade td.neg { background: color-mix(in oklab, var(--green) var(--k), var(--panel)); color: var(--ink); outline: 1.5px dashed var(--green); outline-offset: -2px; }
+.grade td.total { background: transparent; border: 1.5px solid var(--ink); font-weight: 500; }
+.card-foot { margin-top: 12px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); }
+.stamp { font-family: var(--display); color: var(--red); border: 2px solid var(--red); border-radius: 6px; padding: 2px 10px; transform: rotate(-3deg); display: inline-block; font-size: 0.95rem; }
+.note-2022 { margin-top: 10px; font-size: 0.85rem; }
+
+/* sections */
+section { padding-block: 64px; border-top: 1px solid var(--rule); }
+.sec-head { display: grid; gap: 10px; max-width: 46em; margin-bottom: 32px; align-content: start; }
+.sec-head p { color: var(--muted); }
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
+.stat { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 18px; display: grid; gap: 6px; align-content: start; }
+.stat .k { font-size: 0.85rem; color: var(--muted); }
+.stat .v { font: 500 1.9rem/1.1 var(--mono); }
+.stat .s { font-size: 0.85rem; }
+.honest { margin-top: 24px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px; align-items: start; padding: 20px; border: 1.5px dashed var(--ink); border-radius: 8px; }
+.honest .mark { font: 700 2.2rem/1 var(--display); color: var(--red); }
+.honest p + p { margin-top: 8px; }
+
+.feature { display: grid; gap: 10px; padding-top: 16px; border-top: 2px solid var(--ink); }
+.feature p { color: var(--muted); font-size: 0.95rem; }
+.feature ul { margin: 0; padding-left: 18px; font-size: 0.92rem; }
+
+/* compliance demo */
+.demo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.demo label { font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 6px; }
+.demo textarea { width: 100%; min-height: 190px; resize: vertical; font: 15px/1.7 var(--body); color: var(--ink); background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; }
+.out { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; min-height: 190px; display: grid; gap: 8px; align-content: start; }
+.sent { display: grid; gap: 3px; }
+.sent.cut .t { text-decoration: line-through; text-decoration-color: var(--red); text-decoration-thickness: 2px; color: var(--muted); }
+.why { display: flex; gap: 6px; flex-wrap: wrap; }
+.tag { font: 400 0.72rem/1.5 var(--mono); padding: 0 6px; border-radius: 4px; border: 1px solid var(--red); color: var(--red); }
+.tag.ok { border-color: var(--green); color: var(--green); }
+.summary { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 8px; margin-top: 4px; }
+.modes { margin-top: 28px; }
+.scroll table.plain { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.93rem; }
+.plain th, .plain td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.plain th { font-weight: 500; color: var(--muted); font-size: 0.85rem; }
+
+/* api */
+pre { margin: 0; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 16px; overflow-x: auto; font: 13px/1.6 var(--mono); }
+pre .c { color: var(--muted); }
+pre .s { color: var(--red); }
+
+/* pricing */
+.plans { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.plan { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 20px; display: grid; gap: 12px; align-content: start; }
+.plan.feat { border: 2px solid var(--ink); }
+.plan .price { font: 500 1.9rem/1 var(--mono); }
+.plan .price small { font: 400 0.8rem var(--body); color: var(--muted); }
+.plan ul { margin: 0; padding-left: 18px; font-size: 0.9rem; display: grid; gap: 4px; }
+.plan .who { font-size: 0.85rem; color: var(--muted); }
+
+/* trial */
+.trial { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 32px; align-items: start; }
+.steps { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; counter-reset: s; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 12px; }
+.steps li::before { content: counter(s); font: 700 1.3rem/1.2 var(--display); color: var(--red); }
+footer { padding-block: 32px 48px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.82rem; }
+footer p + p { margin-top: 8px; }
+
+@media (max-width: 900px) {
+  .hero, .trial, .demo, .two { grid-template-columns: minmax(0, 1fr); }
+  .four, .plans { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hero { padding-block: 36px 28px; gap: 32px; }
+}
+@media (max-width: 520px) {
+  .four, .plans { grid-template-columns: minmax(0, 1fr); }
+  nav.links { gap: 12px; font-size: 0.85rem; }
+  .honest { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .grade td { animation: ink 0.5s ease-out both; animation-delay: calc(var(--i) * 18ms); }
+  @keyframes ink { from { filter: saturate(0.2); } to { filter: none; } }
+  .btn { transition: transform 0.15s; }
+}
+</style>
+
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top">Finpre <small>AI 投資研究</small></a>
+    <nav class="links" aria-label="頁面導覽">
+      <a href="#scorecard">成績單</a><a href="#features">功能</a><a href="#compliance">合規</a><a href="#api">API</a><a href="#pricing">方案</a><a href="#trial">試用</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <div class="wrap hero">
+    <div>
+      <p class="eyebrow">台股 · 美股 · 四位 AI 分析師</p>
+      <h1>每個訊號，<br>都附<span class="pen">成績單</span>。</h1>
+      <p class="lede">技術、基本面／籌碼、量化三位 AI 分析師平行研究，首席分析師整合成訊號與未來報酬區間。每一個數字都能追溯到模型過去的真實表現，包括表現不好的那一年。</p>
+      <div class="cta">
+        <a class="btn primary" href="#trial">申請 30 天企業試用</a>
+        <a class="btn" href="#scorecard">看完整成績單</a>
+      </div>
+      <div class="facts">
+        <div><b class="num">49/50</b><span>台股 5 日：勝過 random walk 的股票數</span></div>
+        <div><b class="num">2018–26</b><span>walk-forward 回測，每月重訓</span></div>
+        <div><b class="num">0</b><span>研究模式的買賣建議（程式強制）</span></div>
+      </div>
+    </div>
+
+    <div class="card" aria-labelledby="rc-title">
+      <div class="card-head">
+        <h3 id="rc-title">模型成績單 · 各年度</h3>
+        <span class="eyebrow">CRPS 相對 random walk</span>
+      </div>
+      <div class="scroll">
+        <table class="grade" id="grade">
+          <thead><tr><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="note-2022"><span class="stamp">2022 不及格</span>&nbsp; 空頭年四組全部輸給 random walk。我們照樣列出來。</p>
+      <div class="card-foot">
+        <span>LightGBM，每月重訓；每組 50 檔股票。正值＝機率預測比 random walk 準。</span>
+        <span><span class="up">■</span> 勝過　<span class="down">■</span> 落後（台股紅漲綠跌）</span>
+      </div>
+    </div>
+  </div>
+
+  <section id="scorecard">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">成績單</p>
+        <h2>我們從 Google TimesFM 出發，最後讓數字決定用誰</h2>
+        <p>同一套 walk-forward 引擎（模型只看得到預測當下以前的資料）比較了基礎模型、統計基準與本地訓練模型。2018–2026 的結果，每月重訓的 LightGBM 在四個市場／天期都勝出，所以它是現在的 champion；TimesFM 2.5 的強項是區間校準，保留為基準與退回模型。</p>
+      </div>
+      <div class="four">
+        <div class="stat"><span class="k">台股 5 日</span><span class="v up">+1.77%</span><span class="s"><span class="num">49/50</span> 檔勝出 · 80% 區間覆蓋 <span class="num">78%</span></span></div>
+        <div class="stat"><span class="k">台股 20 日</span><span class="v up">+3.01%</span><span class="s"><span class="num">44/50</span> 檔勝出 · 覆蓋 <span class="num">76%</span></span></div>
+        <div class="stat"><span class="k">美股 5 日</span><span class="v up">+0.81%</span><span class="s"><span class="num">48/50</span> 檔勝出 · 覆蓋 <span class="num">78%</span></span></div>
+        <div class="stat"><span class="k">美股 20 日</span><span class="v up">+0.61%</span><span class="s"><span class="num">37/50</span> 檔勝出 · 覆蓋 <span class="num">75%</span></span></div>
+      </div>
+      <p class="summary" style="margin-top:14px">對照：TimesFM 2.5（zero-shot）同期為 <span class="num down">−1.02%</span>、<span class="num down">−1.56%</span>、<span class="num down">−2.11%</span>、<span class="num down">−3.26%</span>，80% 區間覆蓋 77–83%。上線後的每一筆預測也每天自動計分，公開在產品的成績單頁。</p>
+      <div class="honest">
+        <span class="mark">註</span>
+        <div>
+          <p><b>選股排序：統計上有效，扣成本後不賺錢。</b>逐日選出上市流動性前 50 大，LightGBM＋籌碼的每週 IC 約 <span class="num">0.03</span>（t ≈ <span class="num">3.4</span>），9 年中 7–8 年為正。但扣掉每次來回 <span class="num">58.5 bps</span> 的手續費與證交稅後，前 10 名組合<b>沒有</b>勝過等權持有。</p>
+          <p>所以在 Finpre 裡它叫「研究清單」，用來縮小研究範圍，而且這個結果直接印在每一份每日報告上。我們也不賣擇時訊號：長期回測中它沒有贏過買進持有。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">功能</p>
+        <h2>研究、風險、報告，一套引擎</h2>
+      </div>
+      <div class="four">
+        <div class="feature"><h3>多代理個股研究</h3><p>輸入代號，10–30 秒得到三位分析師的報告與整合結論。</p><ul><li>技術：均線、KD、MACD、量價、ADX</li><li>基本面／籌碼：月營收、本益比百分位、三大法人、融資券、新聞情緒</li><li>量化：未來 5／20 日報酬率分位數與上漲機率</li></ul></div>
+        <div class="feature"><h3>風險雷達</h3><p>輸入持股，看到組合最壞會怎樣、風險集中在哪裡。</p><ul><li>報酬區間、95% VaR 與 ES</li><li>集中度、產業、平均相關係數</li><li>各持股的尾端損失貢獻、美元匯率</li></ul></div>
+        <div class="feature"><h3>每日盤後報告</h3><p>收盤後自動產生，HTML／Markdown 可直接轉發會員或 LINE。</p><ul><li>市場狀態燈號（多頭／盤整／空頭）</li><li>研究清單排名＋扣成本揭露</li><li>觀察清單的未來報酬區間與法人動向</li></ul></div>
+        <div class="feature"><h3>API 與白標</h3><p>同一套能力用 REST API 整合進你的系統。</p><ul><li>API 金鑰、方案計量，失敗不扣額度</li><li>稽核紀錄匯出（JSON Lines）</li><li>報告換成貴公司品牌</li></ul></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="compliance">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">合規</p>
+        <h2>合規寫在程式裡，不靠提醒 AI 要守規矩</h2>
+        <p>依《證券投資信託及顧問法》，對不特定人提供個股買賣建議屬投資顧問業務。Finpre 預設的研究模式在輸出前逐句檢查：全形、簡體、夾空白或隱藏字元的寫法先還原，再移除建議用語與價位。法人買賣超這類事實保留。試試看：</p>
+      </div>
+      <div class="demo">
+        <div>
+          <label for="demo-in">AI 寫出的原文（可以自己改）</label>
+          <textarea id="demo-in" spellcheck="false">台積電技術面偏多，外資連 3 日買進。建議逢低布局，停損 950 元。模型估計未來 5 日報酬率的 80% 區間為 -3.5% ～ +4.1%。现在**买**进！公司海外布局持續，EPS 12.5 元。</textarea>
+        </div>
+        <div>
+          <label id="demo-out-label">研究模式輸出（簡化示範）</label>
+          <div class="out" id="demo-out" aria-labelledby="demo-out-label" aria-live="polite"></div>
+        </div>
+      </div>
+      <div class="modes scroll">
+        <table class="plain">
+          <thead><tr><th></th><th>研究模式（預設）</th><th>顧問模式</th></tr></thead>
+          <tbody>
+            <tr><th>適用對象</th><td>所有非持牌客戶</td><td>企業版<b>且</b>持有證券投資顧問事業許可的機構</td></tr>
+            <tr><th>輸出</th><td>訊號、分數、信心、報酬率區間（%）、波動、模型成績</td><td>另含動作、部位、進場、停損、停利</td></tr>
+            <tr><th>稽核</th><td colspan="2">每一筆輸出寫入 HMAC 雜湊鏈稽核紀錄並每日錨定；被過濾的內容只留在稽核紀錄，可匯出給法遵</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="api">
+    <div class="wrap two">
+      <div class="sec-head" style="margin:0">
+        <p class="eyebrow">API</p>
+        <h2>一個請求，一份研究</h2>
+        <p>分析、預測、排名、風險雷達、每日報告、成績單都有對應端點。研究模式的回應只告訴你過濾了幾句，不會回傳被過濾的內容。相同請求 30 分鐘內由快取回覆。</p>
+      </div>
+<pre><span class="c"># 研究模式租戶</span>
+curl -H "X-API-Key: $KEY" -d '{"ticker":"2330"}' \
+     https://api.example/v1/analyze
+
+{
+  "mode": "research",
+  "decision": {
+    "signal": <span class="s">"偏多"</span>, "signal_score": 0.88,
+    "conviction": 63,
+    "return_band_pct": [-3.5, 4.1],
+    "client_message": "…以上為統計模型的研究結果，並非買賣建議。"
+  },
+  "compliance": { "removed_sentences": 0, "removed_fields": 9 },
+  "elapsed_s": 10.6
+}</pre>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">方案（新台幣／月）</p>
+        <h2>從個人研究到投顧機構</h2>
+      </div>
+      <div class="plans">
+        <div class="plan"><h3>免費</h3><div class="price">0</div><p class="who">先看看成績單</p><ul><li>每日 3 次完整分析</li><li>每日報告（排名前 5）</li><li>風險雷達 5 檔</li></ul></div>
+        <div class="plan"><h3>研究版</h3><div class="price">690 <small>年繳 6,900</small></div><p class="who">專業個人投資人</p><ul><li>每日 50 次完整分析</li><li>完整排名與每日報告</li><li>觀察清單、風險雷達 30 檔</li></ul></div>
+        <div class="plan"><h3>專業版</h3><div class="price">1,990</div><p class="who">內容創作者、小型團隊</p><ul><li>每日 200 次完整分析</li><li>API 每月 5,000 次</li><li>觀察清單 200 檔、風險雷達 60 檔</li></ul></div>
+        <div class="plan feat"><h3>企業版</h3><div class="price">60,000 <small>起</small></div><p class="who">投顧、券商研究部、投信</p><ul><li>顧問模式（持牌機構）</li><li>白標報告、專屬股票池</li><li>API 每月 20 萬次、稽核匯出</li></ul></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="trial">
+    <div class="wrap trial">
+      <div>
+        <p class="eyebrow">企業試用</p>
+        <h2 style="margin-top:10px">30 天，用你的股票池驗證</h2>
+        <ol class="steps" style="margin-top:22px">
+          <li><div><b>給我們你的股票池</b><br><span style="color:var(--muted)">例如會員最常問的 50 檔，或你們的研究涵蓋清單。</span></div></li>
+          <li><div><b>兩週內交付成績單</b><br><span style="color:var(--muted)">這些股票上的 walk-forward 回測：哪裡準、哪裡不準、哪一年失靈。</span></div></li>
+          <li><div><b>試用白標每日報告與 API</b><br><span style="color:var(--muted)">研究模式與顧問模式都可試；法遵可以直接檢查稽核匯出。</span></div></li>
+        </ol>
+      </div>
+      <div class="card">
+        <h3>預約 20 分鐘展示</h3>
+        <p style="margin-top:8px;color:var(--muted)">展示內容：個股研究、風險雷達、每日報告、成績單，以及研究模式如何處理「可以買嗎？停損設多少？」這類問題。</p>
+        <p class="summary" style="margin-top:14px">聯絡窗口於正式上線時公布。</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Finpre 為投資研究工具，內容由統計模型與 AI 根據公開資料自動產生，僅呈現訊號、機率與歷史回測結果，不提供個股買賣建議、買賣價位或持股配置建議，亦不構成任何要約。投資有風險，過去績效不代表未來表現。顧問模式僅提供予持有證券投資顧問事業許可之機構，由該機構對其客戶之建議負責。</p>
+    <p class="num">回測資料：2018-01 → 2026-09，walk-forward，LightGBM 每月重訓；台股／美股各 50 檔。</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // ---- report card: LightGBM CRPS skill vs random walk, % (walk-forward 2018–2026)
+  var years = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026];
+  var rows = [
+    ["台股 5 日", [1.00, 1.32, 2.08, 2.54, -0.38, 2.66, 0.94, 2.15, 3.14], 1.77],
+    ["台股 20 日", [0.17, 1.71, 2.72, 2.36, -1.39, 4.71, 1.62, 8.09, 4.98], 3.01],
+    ["美股 5 日", [0.63, 1.02, 2.06, 1.63, -1.24, 1.26, 0.82, 0.71, 0.64], 0.81],
+    ["美股 20 日", [-3.52, 3.23, 3.05, 3.43, -4.48, 1.51, 1.36, 1.75, -0.37], 0.61]
+  ];
+  var t = document.getElementById("grade");
+  var head = t.tHead.rows[0];
+  years.forEach(function (y) { var th = document.createElement("th"); th.textContent = "’" + String(y).slice(2) + (y === 2026 ? "*" : ""); th.title = y + (y === 2026 ? "（至 9 月）" : ""); head.appendChild(th); });
+  var tot = document.createElement("th"); tot.textContent = "全期"; head.appendChild(tot);
+  var i = 0;
+  rows.forEach(function (r) {
+    var tr = t.tBodies[0].insertRow();
+    var th = document.createElement("th"); th.className = "row"; th.scope = "row"; th.textContent = r[0]; tr.appendChild(th);
+    r[1].forEach(function (v, j) {
+      var td = tr.insertCell();
+      var k = Math.min(Math.abs(v) / 4.5, 1) * 62 + 10;
+      td.className = v >= 0 ? "pos" : "neg";
+      td.style.setProperty("--k", k.toFixed(0) + "%");
+      td.style.setProperty("--i", i++);
+      td.textContent = (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(1);
+      td.title = r[0] + " " + years[j] + "：" + (v > 0 ? "+" : "") + v.toFixed(2) + "%";
+    });
+    var tc = tr.insertCell(); tc.className = "total"; tc.textContent = "+" + r[2].toFixed(2);
+  });
+
+  // ---- compliance demo: a simplified port of the research-mode guard
+  var S2T = { "买": "買", "卖": "賣", "进": "進", "码": "碼", "减": "減", "损": "損", "标": "標", "价": "價", "撑": "撐", "压": "壓",
+              "议": "議", "仓": "倉", "场": "場", "资": "資", "应": "應", "该": "該", "点": "點", "线": "線", "区": "區", "获": "獲",
+              "结": "結", "续": "續", "车": "車" };
+  var deco = document.createElement("textarea");
+  function normalize(s) {
+    deco.innerHTML = s.replace(/</g, "&lt;");
+    s = deco.value.normalize("NFKC").replace(/[​-‏⁠-⁯﻿­]/g, "").replace(/[*`~#>|]/g, "").replace(/_/g, " ");
+    s = s.replace(/([㐀-鿿])[\s　]+(?=[㐀-鿿])/g, "$1");
+    return Array.from(s).map(function (c) { return S2T[c] || c; }).join("");
+  }
+  var ALWAYS = new RegExp([
+    "目標價", "(?:第[一二三]|短線|上檔|下檔)目標", "(?:停損|停利|止損|防守|進場|出場)(?:價|點|位)", "防守價", "買點", "賣點", "低接", "上車", "出清",
+    "獲利了結", "續抱", "關鍵價", "(?:上檔|下檔)?(?:壓力|支撐)(?:位|區|價|帶|線)", "(?:跌破|突破|守住|站穩)\\S{0,4}(?:壓力|支撐)",
+    "(?:上看|下看)\\s*\\$?\\d", "建議部位", "(?:建議|可|宜)\\S{0,2}配置",
+    "建議(?:您|你)?[^\\s，。,；;！？!?、]{0,2}(?:買|賣|持有|觀望|避開|減|加|布局|佈局|分批|逢|續抱|出|進|停|介入)",
+    "(?:可以|可(?!能|望)|應該|不妨|(?<!便)宜|請|最好)[^\\s，。,；;！？!?、]{0,2}(?:買|賣|加碼|減碼|布局|佈局|進場|出場|介入|承接|低接|逢|分批|停損|出清)",
+    "\\bbuy(?:s|ing)?\\b(?![- ]?(?:back|side))", "\\bsell(?:s|ing)?\\b(?![- ]?(?:off|side))", "\\bgo(?:ing)? (?:long|short)\\b",
+    "\\bstop[- ]?loss\\b", "\\btake[- ]?profit\\b", "\\btarget (?:price|of)\\b", "\\bstrong ?buy\\b"].join("|"), "gi");
+  var ACTION = /買進|買入|賣出|加碼|減碼|布局|佈局|進場|出場|做多|做空|放空|逢低|逢高|追高|抄底|承接|停損|停利|止損|加倉|減倉/g;
+  var FACT = /外資|投信|自營商|三大法人|法人|內部人|董監|大股東|主力|散戶|大戶|機構|基金|央行|公司|企業|集團|融資|融券|資金|市場|海外|產業|供應鏈|期貨/;
+  var CUE = /建議|可以|可(?!能|望)|應該|不妨|(?<!便)宜|請|你|您|就該|跟著|跟進|一起|快(?!速)|吧|值得|考慮|適合|趁|不如|最好/;
+  var SPLIT = /[。，,；;！？!?\n、：:]/;
+  var PRICE = /(?:NT\$|US\$|\$)\s?\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s*(?:元|塊|美元)/g;
+  var AMOUNT = /(?:EPS|每股盈餘|每股淨值|股利|股息|配息|營收|淨利|獲利|毛利|市值|成交金額|成本|費用)[^。，,；;！？!?]{0,10}$/i;
+
+  function clause(s, a, b) {
+    var head = s.slice(0, a), tail = s.slice(b);
+    var cut = -1;
+    for (var k = head.length - 1; k >= 0; k--) { if (SPLIT.test(head[k])) { cut = k; break; } }
+    var m = tail.search(SPLIT);
+    return [head.slice(cut + 1), m >= 0 ? tail.slice(0, m) : tail];
+  }
+  function violations(raw) {
+    var s = normalize(raw), out = [], m;
+    ALWAYS.lastIndex = 0; while ((m = ALWAYS.exec(s))) out.push(m[0]);
+    ACTION.lastIndex = 0;
+    while ((m = ACTION.exec(s))) {
+      var c = clause(s, m.index, m.index + m[0].length);
+      if (FACT.test(c[0]) && !CUE.test(c[0] + c[1])) continue;
+      out.push(m[0]);
+    }
+    PRICE.lastIndex = 0;
+    while ((m = PRICE.exec(s))) { if (!AMOUNT.test(s.slice(Math.max(0, m.index - 16), m.index))) out.push("價位 " + m[0].trim()); }
+    return out.filter(function (v, k, a) { return a.indexOf(v) === k; });
+  }
+  var input = document.getElementById("demo-in"), box = document.getElementById("demo-out");
+  function render() {
+    var parts = input.value.split(/(?<=[。！？!?；;\n])/).filter(function (x) { return x.trim(); });
+    box.textContent = "";
+    var cut = 0;
+    parts.forEach(function (p) {
+      var v = violations(p);
+      var div = document.createElement("div"); div.className = "sent" + (v.length ? " cut" : "");
+      var t = document.createElement("span"); t.className = "t"; t.textContent = p.trim(); div.appendChild(t);
+      var why = document.createElement("div"); why.className = "why";
+      if (v.length) { cut++; v.slice(0, 4).forEach(function (x) { var g = document.createElement("span"); g.className = "tag"; g.textContent = x; why.appendChild(g); }); }
+      else { var g = document.createElement("span"); g.className = "tag ok"; g.textContent = "保留"; why.appendChild(g); }
+      div.appendChild(why); box.appendChild(div);
+    });
+    var sum = document.createElement("p"); sum.className = "summary";
+    sum.textContent = "移除 " + cut + " 句，保留 " + (parts.length - cut) + " 句。使用者只會看到保留的句子；被移除的原文寫入稽核紀錄。";
+    box.appendChild(sum);
+  }
+  input.addEventListener("input", render);
+  render();
+})();
+</script>
+
+</body>
+</html>

@@ -9,7 +9,7 @@ import uuid
 
 import httpx
 
-from .base import LLMClient, LLMResponse, Message, Tool, ToolCall, strip_thinking
+from .base import LLMClient, LLMResponse, Message, ToolCall, strip_thinking
 
 log = logging.getLogger(__name__)
 

@@ -35,6 +35,8 @@ class RankConfig:
     n_quantiles: int = 5
     cost_bps: float = 58.5               # round-trip cost charged on the traded fraction of the book
     train_stride: int = 2                # use every k-th date for training (labels overlap anyway)
+    smooth: tuple = ()                   # EMA weights on the previous rebalance's rank, e.g. (0.5, 0.75):
+                                         # adds "<scorer>~s0.5" variants that trade less
 
 
 def rebalance_dates(panel: pd.DataFrame, cfg: RankConfig) -> pd.DatetimeIndex:
@@ -88,11 +90,16 @@ def rank_backtest(panel: pd.DataFrame, scorers: list[Scorer], cfg: RankConfig, r
     epi = episode_of(rebal, market)
     cost = cfg.cost_bps / 1e4
     out = []
+    variants: list[tuple[str, dict]] = []
     for sc in scorers:
         if getattr(sc, "trainable", False):
             scores = _score_trainable(sc, panel, rebal, cfg, progress)
         else:
             scores = {d: pd.Series(sc.score(panel.loc[d]), index=panel.loc[d].index) for d in rebal}
+        variants.append((sc.name, scores))
+        for a in cfg.smooth:
+            variants.append((f"{sc.name}~s{a:g}", smooth_scores(scores, rebal, a)))
+    for name, scores in variants:
         prev_top, prev_bot, held = set(), set(), []
         for i, d in enumerate(rebal):
             x = panel.loc[d, ["fwd_ret"]].copy()
@@ -109,7 +116,7 @@ def rank_backtest(panel: pd.DataFrame, scorers: list[Scorer], cfg: RankConfig, r
             t_top = 1.0 if not prev_top else len(top - prev_top) / cfg.top_n
             t_bot = 1.0 if not prev_bot else len(bot - prev_bot) / cfg.top_n
             r_top, r_bot, r_ew = simple[list(top)].mean(), simple[list(bot)].mean(), simple.mean()
-            row = {"scorer": sc.name, "date": d, "n": len(x), "ic": ic, "top": r_top, "bottom": r_bot, "ew": r_ew,
+            row = {"scorer": name, "date": d, "n": len(x), "ic": ic, "top": r_top, "bottom": r_bot, "ew": r_ew,
                    "turnover": t_top, "top_net": r_top - t_top * cost,
                    "ls_net": (r_top - r_bot) - (t_top + t_bot) * cost, "regime": reg[i], "episode": epi[i],
                    "top_names": ",".join(sorted(map(str, top)))}
@@ -128,6 +135,20 @@ def rank_backtest(panel: pd.DataFrame, scorers: list[Scorer], cfg: RankConfig, r
             out.append(row)
             prev_top, prev_bot = top, bot
     return pd.DataFrame(out)
+
+
+def smooth_scores(scores: dict, rebal, alpha: float) -> dict:
+    """EMA of each stock's cross-sectional rank across rebalances: yesterday's view keeps weight `alpha`.
+    Ranks (not raw scores) are smoothed because monthly refits change the score scale."""
+    out, prev = {}, None
+    for d in rebal:
+        r = scores[d].rank(pct=True)
+        if prev is not None:
+            p = prev.reindex(r.index)
+            r = (1 - alpha) * r + alpha * p.fillna(r)
+        out[d] = r
+        prev = r
+    return out
 
 
 def _drawdown(r: pd.Series) -> float:

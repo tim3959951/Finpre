@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from fintech_agent.data import SyntheticProvider, parse_symbol
-from fintech_agent.data.covariates import align_series, build_covariates, chip_columns, covariate_features
+from fintech_agent.data.covariates import align_series, chip_columns, covariate_features
 from fintech_agent.evaluation.backtest import BacktestConfig, run_backtest
 from fintech_agent.forecasting.base import QUANTILES
 from fintech_agent.forecasting.baselines import NaiveForecaster
@@ -242,3 +242,25 @@ def test_regime_at_handles_repeated_dates():
     d = list(c.index[300:305]) * 3                             # many tickers share an origin date
     out = regime_at(r, d)
     assert len(out) == 15 and list(out[:5]) == list(out[5:10])
+
+
+def test_incremental_history_fetches_only_new_days(tmp_path):
+    from fintech_agent.data.history import IncrementalHistory
+    calls = []
+
+    def fetch(a, b):
+        calls.append((a, b))
+        d = pd.bdate_range(a, b)
+        return pd.DataFrame({"date": d.strftime("%Y-%m-%d"), "name": "Foreign_Investor", "buy": 1.0, "sell": 0.0})
+
+    legacy = tmp_path / "cache"
+    legacy.mkdir()
+    fetch("2025-01-01", "2025-03-31").to_parquet(legacy / "inst_hist_2330_2025-01-01_2025-03-31_abcd1234.parquet")
+    calls.clear()
+    h = IncrementalHistory(tmp_path / "hist", legacy_dir=legacy)
+    df = h.get("inst_hist", "2330", "2025-01-01", "2025-04-30", fetch, keys=("date", "name"))
+    assert len(calls) == 1 and calls[0][0] >= "2025-03-20"          # adopted the old file, fetched only the tail
+    assert df["date"].is_monotonic_increasing and not df.duplicated(["date", "name"]).any()
+    calls.clear()
+    h.get("inst_hist", "2330", "2025-01-01", "2025-04-30", fetch, keys=("date", "name"))
+    assert calls == []                                              # nothing new: no network

@@ -123,10 +123,18 @@ class BaseAgent:
     role = "分析"
     persona = ""
 
-    def __init__(self, provider: DataProvider, llm: LLMClient | None = None, settings: Settings | None = None):
+    def __init__(self, provider: DataProvider, llm: LLMClient | None = None, settings: Settings | None = None,
+                 mode: str = "advisor"):
         self.provider = provider
         self.llm = llm or NullLLM()
         self.settings = settings or get_settings()
+        self.mode = mode                       # "research" adds the no-advice rules to every prompt
+
+    @property
+    def system_prompt(self) -> str:
+        if self.mode == "research":
+            return P.research_persona(self.persona) + P.RESEARCH_RULES
+        return self.persona
 
     # subclasses implement: returns (evidence, base_score, confidence, rule_signals, artifacts)
     def gather(self, ctx: AnalysisContext) -> tuple[dict, float, float, list[tuple[str, float]], dict]:  # pragma: no cover
@@ -151,13 +159,19 @@ class BaseAgent:
         summary, key_points, risks = self.fallback_summary(ctx, evidence, base, signals)
         llm_name = "rule-only"
         if self.llm.enabled:
+            ev_llm, sig_llm = evidence, signals
+            if self.mode == "research":       # the narrator never sees price levels it could repeat
+                from ..product.compliance import ComplianceGuard
+                g = ComplianceGuard("research", [ctx.close], [ctx.symbol.code])
+                ev_llm = g.apply(evidence)[0]
+                sig_llm = [(s, v) for s, v in signals if not g.check(s)]
             prompt = P.NARRATE_TEMPLATE.format(
                 name=ctx.name, code=ctx.symbol.code, market=ctx.symbol.market, currency=ctx.symbol.currency,
                 role=self.role, score=base,
-                confidence=conf, signals="\n".join(f"- {s} ({v:+.2f})" for s, v in signals) or "- (無)",
-                evidence=json.dumps(evidence, ensure_ascii=False, indent=1)[:12000])
+                confidence=conf, signals="\n".join(f"- {s} ({v:+.2f})" for s, v in sig_llm) or "- (無)",
+                evidence=json.dumps(ev_llm, ensure_ascii=False, indent=1)[:12000])
             try:
-                resp = self.llm.chat([Message("user", prompt)], system=self.persona, json_mode=True)
+                resp = self.llm.chat([Message("user", prompt)], system=self.system_prompt, json_mode=True)
                 data = extract_json(resp.text) or {}
                 if data.get("summary"):
                     summary = str(data["summary"])

@@ -1,25 +1,54 @@
-# Fintech Agent — TimesFM 驅動的多代理 AI 投資分析系統
+# Finpre — 每個訊號都附成績單的 AI 投資研究助理
 
-台灣 + 美國市場。四個 Agent 協作：**技術分析師**、**基本面／籌碼／情緒分析師**、**量化 ML 工程師**（TimesFM 2.5 為 v1 基準；2018–2026 回測後由每月重訓的 LightGBM 擔任各市場 champion，Chronos-2 / TimesFM 3.0 等持續當 challenger，另有台股選股排序模型），由 **首席投資顧問** 統籌做最終決策並與客戶對話。
+台股＋美股。四位 AI 分析師協作：**技術分析師**、**基本面／籌碼／情緒分析師**、**量化 ML 工程師**（TimesFM 2.5 為 v1 基準；2018–2026 回測後由每月重訓的 LightGBM 擔任各市場 champion，Chronos-2 / TimesFM 3.0 持續當 challenger，另有台股選股排序模型），由 **首席分析師** 統籌結論並與使用者對話。
 
-詳細設計見 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+差異化：**可驗證**。每個預測都能追溯到 walk-forward 回測與上線後的真實追蹤；表現不好的年份、扣成本後不賺錢的策略也照實公開。
+
+| 功能 | 說明 |
+|---|---|
+| 多代理個股分析 | 一次分析約 10–30 秒：技術、基本面／籌碼／情緒、量化預測 → 整合訊號、信心、未來報酬率區間 |
+| 風險雷達 | 持股組合未來 5／20 日報酬區間、VaR／ES、集中度、相關性、個股尾端損失貢獻、匯率 |
+| 每日盤後報告 | 市場狀態、研究清單排名、觀察清單風險區間、模型成績單；JSON／HTML／Markdown |
+| 成績單 | 回測（2018–2026）＋上線後每日自動計分（區間覆蓋、方向命中、相對 random walk、排名實際 IC） |
+| 合規模式 | 研究模式（預設）在輸出邊界強制移除買賣建議與價位；顧問模式僅限持牌機構；HMAC 雜湊鏈稽核紀錄 |
+| B2B API | API 金鑰、方案限制、計量（失敗退款）、快取、稽核匯出 |
+
+文件：[產品規劃](docs/PRODUCT.md) · [架構與 benchmark](docs/ARCHITECTURE.md) · [API](docs/API.md) · [維運手冊](docs/OPERATIONS.md) · [銷售一頁式簡介](docs/sales/one-pager.md) · [Demo 腳本](docs/sales/demo-script.md) · [產品首頁](docs/sales/landing-page.html)
 
 ## 快速開始（M2 Mac）
 
 ```bash
 git clone git@github.com:tim3959951/Finpre.git && cd Finpre
 uv venv --python python3.11 .venv && source .venv/bin/activate
-uv pip install -e ".[models,llm,dev]"
+uv pip install -e ".[models,llm,api,dev]"
 cp .env.example .env        # 填入 ANTHROPIC_API_KEY / OPENAI_API_KEY / FINMIND_TOKEN（皆為選填）
 
-pytest -q                                   # 單元測試（離線、合成資料）
-python scripts/analyze.py 2330 --provider none          # 規則模式，不需任何 LLM
+pytest -q                                   # 116 個測試（離線、合成資料）
+python scripts/compliance_check.py          # 合規自我測試（對抗式 LLM）
+python scripts/analyze.py 2330 --provider none          # 規則模式，不需任何 LLM（研究模式）
 python scripts/analyze.py NVDA --provider anthropic     # Anthropic API 當大腦
-python scripts/analyze.py 2330 --provider ollama --model qwen3:8b   # 本地 LLM（先 ollama pull qwen3:8b）
-streamlit run fintech_agent/ui/app.py       # 網頁介面：對話 / 個股分析 / 模型實驗室
+streamlit run fintech_agent/ui/app.py       # 網頁：研究助理 / 個股分析 / 風險雷達 / 每日報告 / 成績單 / 模型實驗室
+uvicorn fintech_agent.api.main:app --port 8000          # API，文件在 /docs
+python scripts/daily_job.py --market TW --force         # 每日排程的一次手動執行
 ```
 
-首次執行會從 Hugging Face 下載模型權重（TimesFM 2.5 ≈ 0.9 GB、Chronos-2 ≈ 0.5 GB、Chronos-Bolt small ≈ 0.2 GB）。
+## 部署（Docker）
+
+```bash
+docker compose up -d        # api :8000、web :8501（API 金鑰登入）、scheduler（台股 15:40、美股 06:30）
+docker compose run --rm api python scripts/manage_tenants.py create --name "示範" --plan pro
+```
+
+詳見 [維運手冊](docs/OPERATIONS.md)（上線檢查清單、備份、監控、事件處理）。
+
+## 合規模式
+
+| | 研究模式 `research`（預設） | 顧問模式 `advisor` |
+|---|---|---|
+| 對象 | 所有非持牌客戶 | 企業版＋持牌證券投資顧問事業（兩者缺一不可） |
+| 輸出 | 訊號、分數、信心、報酬率區間（%）、波動、模型成績 | 另含動作、部位、進場、停損、停利 |
+
+研究模式的過濾在程式的輸出邊界執行（正規化全形／簡體／隱藏字元 → 建議用語 → 價位偵測），並由對抗式測試與每日報告掃描把關。設計說明見 [ARCHITECTURE §14](docs/ARCHITECTURE.md)。
 
 ## 模型 benchmark 與 A/B 測試
 
@@ -62,7 +91,7 @@ Champion 查找順序：本機升級紀錄 `runs/champion.json` → `settings.ya
 | TimesFM 2.5 | −1.0% | −1.6% | −2.1% | −3.3% |
 | Chronos-2 | −1.3% | −0.5% | −1.9% | −1.7% |
 
-- 台股選股排序（每天依成交值選出上市前 50）：LightGBM＋籌碼每週 IC 0.030（t = 3.4），前 10 名未扣成本每年多約 9%，扣 58.5 bps 牌價成本後與等權持有打平。
+- 台股選股排序（每天依成交值選出上市前 50）：LightGBM＋籌碼每週 IC 0.03（t ≈ 3.4–3.9），前 10 名未扣成本每年多約 7–9%，扣 58.5 bps 牌價成本後**沒有勝過**等權持有（−0.5% ～ −2.8%）；降低週轉的平滑版本也沒有（ARCHITECTURE §14.6）。產品因此把排名定位成研究篩選，並在報告直接揭露。
 - 用「現行台灣 50」回測會嚴重高估動能策略（存活者偏差）；逐日選股後動能 IC 為負。
 - 圖表：`docs/benchmarks/v0.3/*.png`；完整解讀見 `docs/ARCHITECTURE.md` §11。
 
@@ -84,16 +113,19 @@ Champion 查找順序：本機升級紀錄 `runs/champion.json` → `settings.ya
 
 ```
 fintech_agent/
+  product/       合規模式、稽核紀錄、方案與計量、風險雷達、每日報告、成績單、預測服務
+  api/           FastAPI B2B API
   data/          yfinance + FinMind 資料、快取、籌碼/營收/估值摘要
   features/      技術指標、技術/基本面/籌碼/情緒規則評分
   forecasting/   統一 Forecaster 介面、TimesFM/Chronos/TiRex、基準、DLinear/LGBM、registry
   evaluation/    walk-forward 回測、指標、Diebold-Mariano A/B、實驗紀錄與 champion registry、shadow 線上 A/B
   llm/           可插拔 LLM（Anthropic / OpenAI 相容 / Ollama / 規則模式）+ tool-calling loop
-  agents/        三位專家 + 首席投資顧問（調度、決策、對話）
+  agents/        三位專家 + 首席分析師／顧問（調度、決策、對話；依合規模式輸出）
   ranking/       選股排序：橫斷面特徵、LightGBM 排序器、因子基準、排序回測
   ui/            Streamlit 介面
-scripts/         analyze / benchmark / rank_stocks / train_models / summarize_benchmarks / export_benchmark_charts / plot_benchmarks
+scripts/         daily_job / scheduler / manage_tenants / compliance_check / ui_smoke_test /
+                 analyze / benchmark / rank_stocks / train_models / summarize_benchmarks / export_benchmark_charts / plot_benchmarks
 config/settings.yaml
 ```
 
-> 本系統輸出僅供研究與教育用途，不構成投資建議。若要對外提供個股買賣建議服務，在台灣需具證券投資顧問事業許可。
+> 本系統輸出僅供研究與教育用途，不構成投資建議。若要對外提供個股買賣建議服務，在台灣需具證券投資顧問事業許可；研究模式的呈現方式上線前應請熟悉證券法規的律師確認。

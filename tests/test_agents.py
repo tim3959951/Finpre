@@ -1,6 +1,5 @@
 import json
 
-import pytest
 
 from fintech_agent.agents import ClientProfile, InvestmentAdvisor
 from fintech_agent.data import SyntheticProvider
@@ -38,7 +37,7 @@ def test_extract_json_variants():
 
 
 def test_rule_only_pipeline():
-    adv = InvestmentAdvisor(SyntheticProvider(), llm=NullLLM(), quant_panel=PANEL)
+    adv = InvestmentAdvisor(SyntheticProvider(), llm=NullLLM(), quant_panel=PANEL, mode="advisor")
     res = adv.analyze("2330", 5, ClientProfile(risk="保守"))
     assert set(res.reports) == {"technical", "fundamental", "quant"}
     d = res.decision
@@ -50,7 +49,7 @@ def test_rule_only_pipeline():
 
 def test_llm_adjustment_is_clipped_and_position_capped():
     llm = ScriptedLLM()
-    adv = InvestmentAdvisor(SyntheticProvider(), llm=llm, quant_panel=PANEL)
+    adv = InvestmentAdvisor(SyntheticProvider(), llm=llm, quant_panel=PANEL, mode="advisor")
     res = adv.analyze("AAPL", 5, ClientProfile(risk="穩健"))
     for r in res.reports.values():
         assert r.summary == "LLM 摘要"
@@ -70,9 +69,11 @@ def test_tool_loop_and_chat():
 
 
 def test_rule_chat_parses_ticker():
-    adv = InvestmentAdvisor(SyntheticProvider(), llm=NullLLM(), quant_panel=PANEL)
+    adv = InvestmentAdvisor(SyntheticProvider(), llm=NullLLM(), quant_panel=PANEL, mode="advisor")
     out, _ = adv.chat([], "幫我分析2330 20日", ClientProfile())
     assert "2330" in out and "建議" in out
+    res_out, _ = InvestmentAdvisor(SyntheticProvider(), llm=NullLLM(), quant_panel=PANEL).chat([], "分析2330", ClientProfile())
+    assert "綜合訊號" in res_out and "建議：" not in res_out
 
 
 def test_anthropic_message_conversion_merges_tool_results():

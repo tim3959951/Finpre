@@ -34,6 +34,7 @@ from fintech_agent.data.universe import (UNIVERSES, bulk_prices, point_in_time_m
                                          tw_listed_codes)
 from fintech_agent.evaluation.regimes import market_regime  # noqa: E402
 from fintech_agent.forecasting.registry import checkpoint_path  # noqa: E402
+from fintech_agent.product.scorecard import archive_ranking  # noqa: E402
 from fintech_agent.ranking import (LGBMRanker, RankConfig, breakdown, build_panel, factor_scorers,  # noqa: E402
                                    rank_backtest, summarize)
 
@@ -72,6 +73,11 @@ def main() -> None:
     ap.add_argument("--top", type=int, default=10)
     ap.add_argument("--out", default=None, help="per-period CSV path prefix")
     ap.add_argument("--no-snapshot", action="store_true")
+    ap.add_argument("--smooth", nargs="*", type=float, default=[], help="EMA weights for low-turnover variants, e.g. 0.5 0.75")
+    ap.add_argument("--scorers", nargs="*", default=None, help="limit the backtest to these scorers")
+    ap.add_argument("--tag", default="", help="suffix for the backtest report file (experiments)")
+    ap.add_argument("--cached-chips", type=int, default=0,
+                    help="reuse stored 籌碼 history up to N days old instead of refreshing (backtests)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING)
 
@@ -79,6 +85,7 @@ def main() -> None:
     prov = LiveDataProvider(s)
     prov.years = args.years
     prov.fm.max_wait_s = 3600
+    prov.chips_stale_ok_days = args.cached_chips
     t0 = time.time()
     members = None
     if args.pool:
@@ -114,12 +121,14 @@ def main() -> None:
           f"({time.time() - t0:.0f}s)", flush=True)
     cost = float(s.get_path(f"evaluation.cost_bps.{market}", 0))
     cfg = RankConfig(horizon=args.horizon, start=args.start, end=args.end, retrain=args.retrain,
-                     train_years=args.train_years, top_n=args.top, cost_bps=cost)
+                     train_years=args.train_years, top_n=args.top, cost_bps=cost, smooth=tuple(args.smooth))
     runs = s.resolve_path("evaluation.runs_dir")
     ranker = LGBMRanker(chips=chips)
-    bt_path = runs / f"ranking_backtest_{label}_h{args.horizon}.json"
+    bt_path = runs / f"ranking_backtest_{label}_h{args.horizon}{args.tag}.json"
     if args.backtest:
         scorers = [LGBMRanker(chips=False)] + ([LGBMRanker(chips=True)] if chips else []) + factor_scorers(panel)
+        if args.scorers:
+            scorers = [x for x in scorers if x.name in args.scorers]
         per = rank_backtest(panel, scorers, cfg, regime=market_regime(mkt), market=market,
                             progress=lambda m: print("  " + m, flush=True))
         summ = summarize(per, cfg)
@@ -175,6 +184,7 @@ def main() -> None:
     print(f"\n{ranker.name} ranking as of {last.date()} (top {args.top}):")
     for r in snap["ranks"][:args.top]:
         print(f"  {r['rank']:>2}. {r['ticker']} {r['name']}  score {r['score']:.3f}")
+    archive_ranking(snap, s)
     print(f"snapshot → {out}")
 
 

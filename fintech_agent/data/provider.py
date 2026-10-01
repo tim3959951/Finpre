@@ -248,9 +248,20 @@ class LiveDataProvider(DataProvider):
         if sym.market == "TW":
             start = (prices.index[0] - pd.Timedelta(days=90)).date().isoformat()
             end = prices.index[-1].date().isoformat()
-            inst = self.cache.frame(f"inst_hist_{sym.code}_{start}_{end}", lambda: self.fm.institutional_range(sym.code, start, end))
-            margin = self.cache.frame(f"margin_hist_{sym.code}_{start}_{end}", lambda: self.fm.margin_range(sym.code, start, end))
+            hist = self._history()
+            stale = int(getattr(self, "chips_stale_ok_days", 0))
+            inst = hist.get("inst_hist", sym.code, start, end, lambda a, b: self.fm.institutional_range(sym.code, a, b),
+                            keys=("date", "name"), stale_ok_days=stale)
+            margin = hist.get("margin_hist", sym.code, start, end, lambda a, b: self.fm.margin_range(sym.code, a, b),
+                              stale_ok_days=stale)
         return build_covariates(prices, sym.market, closes, inst, margin)
+
+    def _history(self):
+        from .history import IncrementalHistory
+        if not hasattr(self, "_hist"):
+            root = self.settings.resolve_path("data.cache_dir")
+            self._hist = IncrementalHistory(root / "history", legacy_dir=root)
+        return self._hist
 
     # ---------------------------------------------------------------- market context
     def market_context(self, market: str) -> dict:

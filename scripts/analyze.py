@@ -4,6 +4,7 @@
   python scripts/analyze.py 2330
   python scripts/analyze.py NVDA --horizon 20 --risk 積極 --provider ollama --model qwen3:8b
   python scripts/analyze.py 2330 --provider none        # rule-only mode, no LLM needed
+  python scripts/analyze.py 2330 --mode advisor         # licensed firms only: buy/sell wording and price levels
 """
 from __future__ import annotations
 
@@ -29,11 +30,13 @@ def main() -> None:
     ap.add_argument("--provider", default=None, help="anthropic | openai | ollama | none")
     ap.add_argument("--model", default=None)
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--mode", choices=["research", "advisor"], default=None,
+                    help="research (default, no buy/sell advice) | advisor (licensed firms only)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING)
     s = get_settings()
     llm = get_llm("advisor", s, provider=args.provider, model=args.model) if args.provider else None
-    adv = InvestmentAdvisor(LiveDataProvider(s), s, llm=llm)
+    adv = InvestmentAdvisor(LiveDataProvider(s), s, llm=llm, mode=args.mode, actor="cli")
     print(f"LLM: {adv.llm.provider}:{adv.llm.model}" + ("" if adv.llm.enabled else f" ({getattr(adv.llm, 'reason', '')})"))
     res = adv.analyze(args.ticker, args.horizon, ClientProfile(risk=args.risk), on_event=lambda m: print("·", m))
     if args.json:
@@ -45,8 +48,13 @@ def main() -> None:
         print(f"\n[{r.title}] {r.stance} {r.score:+.2f} (信心 {r.confidence:.0%}, {r.llm})\n  {r.summary}")
         for k in r.key_points:
             print(f"   - {k}")
-    print(f"\n[首席投資顧問] {d['action']} · 信心 {d['conviction']}% · 部位 {d['position_pct']}%")
-    print(f"  進場 {d['entry_zone']}  停損 {d['stop_loss']}  停利 {d['take_profit']}")
+    if res.mode == "research":
+        lo, hi = d.get("return_band_pct") or [None, None]
+        band = f" · 80% 報酬率區間 {lo:+.1f}% ～ {hi:+.1f}%" if lo is not None else ""
+        print(f"\n[首席研究分析師] 綜合訊號 {d['signal']}（{d['signal_score']:+.2f}）· 信心 {d['conviction']}%{band}")
+    else:
+        print(f"\n[首席投資顧問] {d['action']} · 信心 {d['conviction']}% · 部位 {d['position_pct']}%")
+        print(f"  進場 {d['entry_zone']}  停損 {d['stop_loss']}  停利 {d['take_profit']}")
     print(f"  {d.get('client_message', '')}")
     print(f"\n{d['disclaimer']}")
 

@@ -1,5 +1,26 @@
 # Fintech Agent configuration. Environment variables in ${VAR} form are expanded.
 
+product:
+  # research: no buy/sell advice, no price levels (default; for the general public)
+  # advisor : full recommendations — ONLY for licensed investment-consulting firms under contract
+  mode: ${FA_MODE:-research}
+  audit: true                    # append-only, hash-chained audit log of every output (runs/audit.sqlite)
+  name: Finpre
+  analysis_cache_minutes: 30     # API: identical analyses within this window are served from memory (still metered)
+  ui:
+    auth: ${FA_UI_AUTH:-none}    # apikey = visitors sign in with a tenant API key (use in any shared deployment)
+  daily:                          # scripts/daily_job.py (run after each market's close; see scripts/scheduler.py)
+    TW:
+      run_at: "15:40"             # Asia/Taipei
+      ranking: ["--pool", "twse", "--pit-top", "50"]
+      tracking_universe: tw50
+      watchlist: ["2330", "2317", "2454", "2308", "2382", "2881", "0050"]
+    US:
+      run_at: "06:30"             # Asia/Taipei, the morning after the US close
+      ranking: ["--universe", "us50"]
+      tracking_universe: us50
+      watchlist: ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "SPY"]
+
 data:
   cache_dir: data_cache          # parquet cache for prices / chips / fundamentals
   cache_ttl_hours: 12

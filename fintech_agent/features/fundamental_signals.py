@@ -69,7 +69,7 @@ def _fundamental_us(f: dict, sig: list) -> None:
         sig.append((f"預估本益比 {fpe:.1f} {'低於' if fpe < pe else '高於'}歷史本益比 {pe:.1f}", 0.1 if fpe < pe else -0.1))
     rm = y.get("analyst_rating_mean")
     if rm is not None:
-        sig.append((f"分析師平均評等 {rm:.1f} (1=強力買進)", 0.2 if rm < 2 else -0.2 if rm > 3 else 0.0))
+        sig.append((f"分析師平均評等 {rm:.1f}（1 = 最正面、5 = 最負面）", 0.2 if rm < 2 else -0.2 if rm > 3 else 0.0))
     peg = y.get("peg")
     if peg is not None and peg > 0:
         sig.append((f"PEG {peg:.2f}", 0.1 if peg < 1 else -0.1 if peg > 2.5 else 0.0))

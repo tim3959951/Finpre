@@ -1,0 +1,33 @@
+# docker compose up -d  →  API :8000 (docs at /docs), web app :8501, daily scheduler
+# First run:  docker compose run --rm api python scripts/train_models.py --universe tw50 --models lgbm --horizons 5 20 --years 13
+#             docker compose run --rm api python scripts/manage_tenants.py create --name "示範" --plan pro
+x-app: &app
+  build: .
+  env_file: .env
+  restart: unless-stopped
+  volumes:
+    - ./runs:/app/runs                 # audit log, tenants, experiments, rankings, scorecard
+    - ./data_cache:/app/data_cache
+    - ./checkpoints:/app/checkpoints
+    - ./reports:/app/reports
+
+services:
+  api:
+    <<: *app
+    ports: ["8000:8000"]
+    command: ["uvicorn", "fintech_agent.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+  web:
+    <<: *app
+    ports: ["8501:8501"]
+    environment:
+      FA_UI_AUTH: apikey               # customers sign in with their API key; plan limits + audit apply
+      FA_UI_ADMIN: "0"                 # model lab / champion promotion stay off in the shared web app
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8501/_stcore/health"]
+    command: ["streamlit", "run", "fintech_agent/ui/app.py", "--server.address", "0.0.0.0", "--server.port", "8501",
+              "--server.headless", "true", "--browser.gatherUsageStats", "false"]
+  scheduler:
+    <<: *app
+    healthcheck:
+      disable: true
+    command: ["python", "scripts/scheduler.py"]

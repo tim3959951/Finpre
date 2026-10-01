@@ -95,7 +95,7 @@ def williams_r(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 14) -
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Return a copy of an OHLCV frame with all indicators appended."""
     out = df.copy()
-    c, h, l, v = out["close"], out["high"], out["low"], out["volume"]
+    c, h, l, v = out["close"], out["high"], out["low"], out["volume"]  # noqa: E741
     for n in MA_WINDOWS:
         out[f"ma{n}"] = sma(c, n)
         out[f"bias{n}"] = (c / out[f"ma{n}"] - 1) * 100          # 乖離率 %

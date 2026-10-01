@@ -8,6 +8,7 @@ checkpoints/
 .pytest_cache/
 .scratch_*
 logs/
+reports/
 *.log
 .DS_Store
 .env.*

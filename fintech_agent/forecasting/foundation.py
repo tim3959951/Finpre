@@ -129,12 +129,10 @@ class ChronosForecaster(Forecaster):
         res: list[ForecastResult] = []
         for s in range(0, len(tensors), self.batch_size):
             chunk = tensors[s:s + self.batch_size]
-            qs, mean = pipe.predict_quantiles(chunk, prediction_length=horizon, quantile_levels=list(QUANTILES))
+            qs, _mean = pipe.predict_quantiles(chunk, prediction_length=horizon, quantile_levels=list(QUANTILES))
             for i in range(len(chunk)):
                 q_i = qs[i] if isinstance(qs, list) else qs[i]
-                m_i = mean[i] if isinstance(mean, list) else mean[i]
                 q_np = q_i.detach().float().cpu().numpy().reshape(-1, horizon, len(QUANTILES))[0]
-                m_np = m_i.detach().float().cpu().numpy().reshape(-1, horizon)[0]
                 # median as point forecast (more robust than the mean for prices)
                 res.append(ForecastResult(self.name, q_np[:, QUANTILES.index(0.5)].astype(float),
                                           {q: q_np[:, j].astype(float) for j, q in enumerate(QUANTILES)}))
@@ -176,7 +174,6 @@ class ChronosCovForecaster(ChronosForecaster):
 
     def predict(self, contexts, horizon, covariates=None):
         pipe = self._load()
-        res: list[ForecastResult] = []
         items = []
         for c, cov in zip(contexts, covariates):
             x = clean_context(c, self.max_context).astype(np.float32)

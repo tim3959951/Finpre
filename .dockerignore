@@ -1,0 +1,9 @@
+.venv
+.git
+runs
+data_cache
+checkpoints
+reports
+logs
+**/__pycache__
+.env

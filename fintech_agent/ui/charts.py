@@ -5,7 +5,6 @@ Candles follow the market's convention: Taiwan 紅漲綠跌, US green-up/red-dow
 """
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -70,6 +69,32 @@ def price_chart(prices: pd.DataFrame, market: str, forecasts: dict[str, Forecast
                       xaxis_rangeslider_visible=False, legend=dict(orientation="h", y=1.04, x=0))
     holidays = pd.bdate_range(df.index[0], df.index[-1]).difference(df.index)   # 春節/國定假日 gaps
     fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"]), dict(values=list(holidays))])
+    return fig
+
+
+def return_fan(forecasts: dict[str, ForecastResult], champion: str | None, last_price: float) -> go.Figure:
+    """Research-mode forecast view: cumulative RETURN (%) by trading day ahead — a distribution, not price levels."""
+    fig = go.Figure()
+    names = [champion] + [m for m in forecasts if m != champion] if champion in forecasts else list(forecasts)
+    for j, m in enumerate(names):
+        fc = forecasts[m]
+        xs = list(range(0, fc.horizon + 1))
+        pct = lambda arr: [0.0] + [(float(v) / last_price - 1) * 100 for v in arr]   # noqa: E731
+        if m == champion and fc.quantiles:
+            lo, hi = pct(fc.q(0.1)), pct(fc.q(0.9))
+            fig.add_trace(go.Scatter(x=xs + xs[::-1], y=hi + lo[::-1], fill="toself", fillcolor="rgba(42,120,214,0.15)",
+                                     line=dict(width=0), name=f"{m} 80% 區間", hoverinfo="skip"))
+            fig.add_trace(go.Scatter(x=xs, y=hi, mode="lines", line=dict(color=SERIES[0], width=0.8), showlegend=False,
+                                     hovertemplate="第 %{x} 日 P90 %{y:+.1f}%<extra></extra>"))
+            fig.add_trace(go.Scatter(x=xs, y=lo, mode="lines", line=dict(color=SERIES[0], width=0.8), showlegend=False,
+                                     hovertemplate="第 %{x} 日 P10 %{y:+.1f}%<extra></extra>"))
+        fig.add_trace(go.Scatter(x=xs, y=pct(fc.point), mode="lines+markers", name=f"{m} 中位數",
+                                 line=dict(color=SERIES[0] if m == champion else SERIES[(j + 3) % len(SERIES)],
+                                           width=2.5 if m == champion else 1.5, dash="solid" if m == champion else "dot"),
+                                 hovertemplate=f"{m} 第 %{{x}} 日 %{{y:+.1f}}%<extra></extra>"))
+    fig.add_hline(y=0, line=dict(color=MUTED, width=1))
+    fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10), yaxis_ticksuffix="%",
+                      xaxis_title="未來交易日", yaxis_title="累積報酬率", legend=dict(orientation="h", y=1.12, x=0))
     return fig
 
 

@@ -1,7 +1,7 @@
 [project]
 name = "fintech-agent"
-version = "0.3.0"
-description = "Multi-agent AI financial analyst for Taiwan & US markets, powered by Google TimesFM with benchmarked forecasting models"
+version = "1.0.0"
+description = "Finpre: multi-agent AI investment research for Taiwan & US markets with walk-forward-validated forecasts, stock ranking, portfolio risk and a compliant B2B API"
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.26",
@@ -12,6 +12,8 @@ dependencies = [
     "httpx>=0.27",
     "pydantic>=2.5",
     "scikit-learn>=1.4",
+    "scipy>=1.11",
+    "lightgbm>=4.3",           # champion forecaster and stock ranker
     "yfinance>=0.2.50",
     "plotly>=5.20",
     "streamlit>=1.35",
@@ -23,11 +25,11 @@ models = [
     "timesfm[torch]>=2.0",
     "chronos-forecasting>=2.0",
     "statsforecast>=1.7",
-    "lightgbm>=4.3",
     "jax>=0.4.30",        # TimesFM XReg (covariates); the timesfm[xreg] extra pins a CUDA build
     "jaxlib>=0.4.30",
 ]
 llm = ["anthropic>=0.40", "openai>=1.50"]
+api = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "httpx>=0.27"]
 dev = ["pytest>=8", "matplotlib>=3.8"]
 
 [build-system]
