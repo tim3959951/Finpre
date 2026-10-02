@@ -97,6 +97,13 @@ Champion 查找順序：本機升級紀錄 `runs/champion.json` → `settings.ya
 
 ![各年度 CRPS skill](docs/benchmarks/v0.3/02_long_skill_by_year.png)
 
+### 決策模型（Jev 類）驗證（2026-10）
+
+用開源、API 與 Jev 相同的 Strands Decider 2B 在 M2 上實測（`scripts/decision_model_bench.py`，設定 `TYPESAFE_API_KEY` 即可改用 Jev 重跑）：
+- **5 日漲跌：沒有預測力**。台／美股各約 2,400 個樣本，Brier 0.33（擲硬幣 0.25）、AUC 0.48–0.50；它的上漲機率和「過去 5 日報酬」的等級相關 0.88，等於在複述動能。同一批樣本上 TimesFM、Chronos 也輸擲硬幣，最好的是每月重訓的 LightGBM＋籌碼（台股 AUC 0.571）。
+- **新聞判讀：台股中文新聞明顯優於現行關鍵字詞典**（與當天超額報酬的 IC 0.26 對 0.14；排除報漲跌的標題後 0.16 對 0.05），美股與 FinBERT 相當；所有方法都無法預測隔天。
+- 結論：決策模型用來把新聞與問題轉成標籤，不用來產生漲跌機率。完整報告：[docs/benchmarks/DECISION-MODEL.md](docs/benchmarks/DECISION-MODEL.md)。
+
 | 模型 | 類型 | 授權 | 備註 |
 |---|---|---|---|
 | `timesfm-2.5` | 基礎模型 | Apache-2.0 | v1 champion / 預設退回模型，200M，16k context，分位數輸出；80% 區間覆蓋最準 |
@@ -125,6 +132,7 @@ fintech_agent/
   ui/            Streamlit 介面
 scripts/         daily_job / scheduler / manage_tenants / compliance_check / ui_smoke_test /
                  analyze / benchmark / rank_stocks / train_models / summarize_benchmarks / export_benchmark_charts / plot_benchmarks
+                 decision_model_bench / plot_decision_bench（決策模型驗證）
 config/settings.yaml
 ```
 

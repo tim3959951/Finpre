@@ -92,8 +92,18 @@ class FinMindClient:
     def financial_statements(self, code: str, days: int = 1200) -> pd.DataFrame:
         return self.fetch("TaiwanStockFinancialStatements", code, self._ago(days))
 
-    def news(self, code: str, days: int = 7) -> pd.DataFrame:
-        return self.fetch("TaiwanStockNews", code, self._ago(days))
+    def news(self, code: str, days: int = 7, limit: int | None = None) -> pd.DataFrame:
+        """News from the last `days` days, newest first. TaiwanStockNews returns a single calendar day per request
+        (start_date only; a date range is rejected), so walk back from today and stop once `limit` items are in."""
+        frames, n = [], 0
+        for k in range(days + 1):
+            df = self.fetch("TaiwanStockNews", code, (date.today() - timedelta(days=k)).isoformat())
+            if len(df):
+                frames.append(df)
+                n += len(df)
+            if limit and n >= limit:
+                break
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
     def institutional_range(self, code: str, start: str, end: str | None = None) -> pd.DataFrame:
         return self.fetch("TaiwanStockInstitutionalInvestorsBuySell", code, start, end)

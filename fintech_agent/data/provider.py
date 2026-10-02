@@ -57,6 +57,26 @@ def _clean_history(df: pd.DataFrame) -> pd.DataFrame:
     return df[(df["close"] > 0) & df["close"].notna()]
 
 
+def yahoo_news_raw(yf_ticker: str, count: int = 20) -> list[dict]:
+    """Raw Yahoo Finance news items. The per-ticker feed (Ticker.news) returned nothing in 2026-10 tests;
+    fall back to Yahoo search, keeping only items tagged with this ticker when tags are present."""
+    import yfinance as yf
+    raw: list[dict] = []
+    try:
+        raw = yf.Ticker(yf_ticker).news or []
+    except Exception as e:
+        log.debug("yfinance news %s failed: %s", yf_ticker, e)
+    if not raw:
+        try:
+            found = yf.Search(yf_ticker, news_count=count, max_results=1).news or []
+        except Exception as e:
+            log.debug("yfinance search %s failed: %s", yf_ticker, e)
+            found = []
+        sym = yf_ticker.upper()
+        raw = [x for x in found if not x.get("relatedTickers") or sym in [t.upper() for t in x["relatedTickers"]]]
+    return raw[:count]
+
+
 def _parse_yf_news(item: dict) -> dict | None:
     c = item.get("content", item) or {}
     title = c.get("title")
@@ -70,7 +90,7 @@ def _parse_yf_news(item: dict) -> dict | None:
     return {
         "date": str(when)[:19] if when else None,
         "title": title,
-        "source": provider.get("displayName") if isinstance(provider, dict) else item.get("publisher"),
+        "source": (provider.get("displayName") if isinstance(provider, dict) else None) or item.get("publisher"),
         "url": url,
         "summary": (c.get("summary") or "")[:400],
     }
@@ -213,18 +233,14 @@ class LiveDataProvider(DataProvider):
         def load() -> list[dict]:
             items: list[dict] = []
             if sym.market == "TW" and not sym.is_index:
-                df = self.fm.news(sym.code, days=7)
+                df = self.fm.news(sym.code, days=7, limit=limit)
                 if len(df):
                     df = df.sort_values("date", ascending=False)
                     for _, r in df.head(limit).iterrows():
                         items.append({"date": str(r.get("date"))[:19], "title": r.get("title"),
                                       "source": r.get("source"), "url": r.get("link"), "summary": ""})
             if len(items) < limit:
-                import yfinance as yf
-                try:
-                    raw = yf.Ticker(sym.yf_ticker).news or []
-                except Exception:
-                    raw = []
+                raw = yahoo_news_raw(sym.yf_ticker, count=limit)
                 items += [n for n in (_parse_yf_news(x) for x in raw) if n]
             seen, uniq = set(), []
             for n in items:
